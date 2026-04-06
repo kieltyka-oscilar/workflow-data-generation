@@ -14,10 +14,10 @@ Generate realistic, rule-constrained synthetic test data from your Oscilar workf
 
 ```bash
 # 1. Get the project (git clone or unzip)
-git clone <your-repo-url>   # or: unzip synthetic-test-generator.zip
+git clone https://github.com/kieltyka-oscilar/workflow-data-generation
 
 # 2. Enter the project folder
-cd "Test Generator"
+cd workflow-data-generation
 
 # 3. Make the script executable (first time only)
 chmod +x install.sh
