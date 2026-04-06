@@ -1,4 +1,4 @@
-# Synthetic Test Generator
+# Workflow data generation
 
 Generate realistic, rule-constrained synthetic test data from your Oscilar workflow JSON and a real sample dataset — no backend required, runs entirely in your browser.
 
