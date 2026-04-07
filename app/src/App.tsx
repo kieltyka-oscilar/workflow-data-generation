@@ -198,12 +198,7 @@ function App() {
         <h1 className="title">Workflow data generator</h1>
         <p className="subtitle">Generate test data to pass/fail rules</p>
 
-        <div style={{ position: 'absolute', top: 0, right: 0, display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          {workflow && (
-            <button className="btn btn-secondary" onClick={saveProject} title="Save Project Setup" aria-label="Save project setup to file">
-              <Save size={18} /> Save Setup
-            </button>
-          )}
+        <div style={{ position: 'absolute', top: 0, right: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'flex-end' }}>
           <button
             className="theme-toggle"
             onClick={toggleTheme}
@@ -214,6 +209,11 @@ function App() {
             {theme === 'dark' ? <Moon size={14} /> : <Sun size={14} />}
             {theme === 'dark' ? 'Dark' : 'Light'}
           </button>
+          {workflow && (
+            <button className="btn btn-secondary" onClick={saveProject} title="Save Project Setup" aria-label="Save project setup to file">
+              <Save size={18} /> Save Setup
+            </button>
+          )}
         </div>
       </header>
 

@@ -98,8 +98,8 @@ export default function ConfirmRules({ rules: initialRules, externalLists, onCon
       )}
 
       <div style={{ marginBottom: '2rem', textAlign: 'center' }}>
-        <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>Workflow Rules Detected</h2>
-        <p>We've identified {localRules.length} rule conditions across {new Set(localRules.map(r => r.description)).size} rulesets.</p>
+        <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>Workflow Decisions & Rules</h2>
+        <p>We've identified {localRules.length} rule conditions across {new Set(localRules.map(r => r.description)).size} decisions.</p>
       </div>
 
       <div style={{ 
@@ -129,7 +129,7 @@ export default function ConfirmRules({ rules: initialRules, externalLists, onCon
                 </div>
                 <div>
                   <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', fontWeight: 700, marginBottom: '0.2rem' }}>
-                    Ruleset
+                    Decision
                   </div>
                   <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                     {rulesetName}
