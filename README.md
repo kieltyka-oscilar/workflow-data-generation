@@ -59,6 +59,11 @@ You need two files to get started:
 | **Workflow Definition** | `.json` | Your Oscilar workflow exported as JSON. Must contain a `workflows` or `actions` key. |
 | **Sample Test Set** | `.jsonl` | Real data records, one JSON object per line. Used to infer the data schema and as a fuzzing baseline. |
 
+**How to export a workflow**
+Open the workflow and click the gear button -> export
+
+<img width="892" height="636" alt="CleanShot 2026-04-07 at 16 22 30@2x" src="https://github.com/user-attachments/assets/839e4f38-fd24-4c43-a6e4-3240a9c98207" />
+
 **How to upload:** Click either upload box or drag-and-drop the file directly onto it. Once both files are loaded, click **Analyze and Proceed**.
 
 > **Tip:** Fields prefixed with `osc_` or `onboarding_events_` are automatically stripped from the schema to keep the output clean.
