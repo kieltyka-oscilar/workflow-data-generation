@@ -115,7 +115,7 @@ export default function ConfirmRules({ rules: initialRules, externalLists, onCon
           const rulesInSet = localRules.filter(r => r.description === rulesetName);
           return (
             <div key={rulesetName} style={{ 
-              background: 'rgba(15, 23, 42, 0.4)', 
+              background: 'var(--field-bg)', 
               border: '1px solid var(--border)', 
               borderRadius: '12px',
               padding: '1.5rem',
@@ -131,7 +131,7 @@ export default function ConfirmRules({ rules: initialRules, externalLists, onCon
                   <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', fontWeight: 700, marginBottom: '0.2rem' }}>
                     Ruleset
                   </div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: 600, color: '#f8fafc' }}>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                     {rulesetName}
                   </div>
                 </div>
@@ -140,23 +140,23 @@ export default function ConfirmRules({ rules: initialRules, externalLists, onCon
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 {rulesInSet.map((rule, idx) => (
                   <div key={rule.id} style={{ 
-                    background: 'rgba(0,0,0,0.25)', 
+                    background: 'var(--container-bg)', 
                     padding: '1.25rem', 
                     borderRadius: '10px', 
-                    border: '1px solid rgba(255,255,255,0.05)',
+                    border: '1px solid var(--border)',
                     position: 'relative'
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.75rem', color: 'var(--primary)', fontSize: '0.95rem', fontWeight: 600 }}>
                       <Activity size={16} /> Rule Condition {rulesInSet.length > 1 ? `#${idx + 1}` : ''}
                     </div>
                     
-                    <div style={{ fontSize: '1.05rem', color: '#e2e8f0', lineHeight: 1.5, marginBottom: '1rem' }}>
-                      <span style={{ background: 'rgba(255,255,255,0.05)', padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                    <div style={{ fontSize: '1.05rem', color: 'var(--text-primary)', lineHeight: 1.5, marginBottom: '1rem' }}>
+                      <span style={{ background: 'var(--container-bg)', padding: '2px 8px', borderRadius: '4px', border: '1px solid var(--border)' }}>
                         {rule.name}
                       </span>
                     </div>
 
-                    <div style={{ fontSize: '0.85rem', fontFamily: 'monospace', color: 'var(--text-secondary)', background: 'rgba(0,0,0,0.4)', padding: '0.75rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.05)', overflowX: 'auto' }}>
+                    <div style={{ fontSize: '0.85rem', fontFamily: 'monospace', color: 'var(--text-secondary)', background: 'var(--container-bg)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)', overflowX: 'auto' }}>
                       {rule.condition}
                     </div>
                   </div>
@@ -166,7 +166,7 @@ export default function ConfirmRules({ rules: initialRules, externalLists, onCon
           );
         })}
         {localRules.length === 0 && (
-          <div style={{ padding: '4rem 2rem', textAlign: 'center', border: '2px dashed var(--border)', borderRadius: '12px', background: 'rgba(15, 23, 42, 0.2)' }}>
+          <div style={{ padding: '4rem 2rem', textAlign: 'center', border: '2px dashed var(--border)', borderRadius: '12px', background: 'var(--container-bg)' }}>
             <p style={{ color: 'var(--text-secondary)', fontSize: '1.1rem' }}>No workflow rules were discovered.</p>
           </div>
         )}

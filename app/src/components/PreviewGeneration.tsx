@@ -387,7 +387,7 @@ export default function PreviewGeneration({ rules, sampleData, schema, config, e
             const validation = validations[i];
 
             return (
-              <div key={i} style={{ background: 'rgba(15, 23, 42, 0.4)', border: `1px solid ${validation ? SEVERITY_COLOR[validation.severity] + '55' : 'var(--border)'}`, borderRadius: '8px', overflow: 'hidden' }}>
+              <div key={i} style={{ background: 'var(--field-bg)', border: `1px solid ${validation ? SEVERITY_COLOR[validation.severity] + '55' : 'var(--border)'}`, borderRadius: '8px', overflow: 'hidden' }}>
                 {/* Header row */}
                 <div style={{ background: 'var(--bg-secondary)', padding: '0.75rem 1rem', borderBottom: '1px solid var(--border)', fontSize: '0.9rem', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>

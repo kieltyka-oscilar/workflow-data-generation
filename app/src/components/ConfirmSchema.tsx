@@ -85,7 +85,7 @@ export default function ConfirmSchema({ schema: initialSchema, onConfirm, onBack
           alignItems: 'center', 
           gap: '0.75rem',
           padding: '0.5rem 0.75rem',
-          background: 'rgba(15, 23, 42, 0.4)',
+          background: 'var(--field-bg)',
           borderRadius: '6px',
           border: '1px solid var(--border)'
         }}>
@@ -163,7 +163,7 @@ export default function ConfirmSchema({ schema: initialSchema, onConfirm, onBack
         overflowY: 'auto', 
         paddingRight: '1rem',
         marginBottom: '2rem',
-        background: 'rgba(0, 0, 0, 0.1)',
+        background: 'var(--container-bg)',
         padding: '1.5rem',
         borderRadius: '12px',
         border: '1px solid var(--glass-border)'

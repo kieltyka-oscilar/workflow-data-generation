@@ -38,7 +38,10 @@ export default function GenerateConfig({ rules, config, setConfig, onConfirm, on
 
   useEffect(() => {
     // Dynamic Outcomes based on Rules
-    const dynamicOutcomes = Array.from(new Set(rules.map(r => r.description || 'Manual Review'))).sort();
+    // Only include rules that terminate directly into an action
+    const terminalRules = rules.filter(r => r.isTerminal);
+    const dynamicOutcomes = Array.from(new Set(terminalRules.map(r => r.description || 'Manual Review'))).sort();
+    
     if (dynamicOutcomes.length === 0) {
       setOutcomes(['Approve Account']);
     } else {
@@ -159,7 +162,7 @@ export default function GenerateConfig({ rules, config, setConfig, onConfirm, on
                 display: 'flex',
                 alignItems: 'center',
                 gap: '1rem',
-                background: 'rgba(15, 23, 42, 0.4)',
+              background: 'var(--field-bg)',
                 padding: '0.875rem 1rem',
                 borderRadius: '8px',
                 border: '1px solid var(--border)',
@@ -170,7 +173,7 @@ export default function GenerateConfig({ rules, config, setConfig, onConfirm, on
                 <div style={{ fontWeight: 600, fontSize: '1.1rem', color: 'var(--primary)', marginBottom: '0.25rem' }}>{outcome}</div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                   {rules.filter(r => r.description === outcome).map(r => (
-                    <span key={r.id} style={{ background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                    <span key={r.id} style={{ background: 'var(--container-bg)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--border)' }}>
                       {r.name}
                     </span>
                   ))}
@@ -225,7 +228,7 @@ export default function GenerateConfig({ rules, config, setConfig, onConfirm, on
         marginBottom: '1.5rem',
         padding: '0.875rem 1.25rem',
         borderRadius: '8px',
-        background: 'rgba(15, 23, 42, 0.5)',
+        background: 'var(--field-bg)',
         border: '1px solid var(--border)',
         display: 'flex',
         justifyContent: 'space-between',

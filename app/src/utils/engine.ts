@@ -207,20 +207,53 @@ export function extractRules(workflow: Workflow): Rule[] {
   const rules: Rule[] = [];
   if (!workflow.workflows) return rules;
 
+  // Build a lookup map of global action names
+  const actionsRegistry = new Map<string, string>();
+  workflow.actions?.forEach(a => {
+    actionsRegistry.set(a.id, a.name);
+  });
+
   workflow.workflows.forEach((wf, wfIdx) => {
     if (!wf.execution_graph?.steps) return;
+    const steps = wf.execution_graph.steps;
     
-    wf.execution_graph.steps.forEach((step, stepIdx) => {
+    steps.forEach((step, stepIdx) => {
       // Only extract rules from decision steps for now
       if (step.type === 'decision' && step.edges) {
         step.edges.forEach((edge, edgeIdx) => {
           if (edge.condition?.plaintext) {
+            
+            // Default to step name/label if we can't trace to an action
+            let actionName = step.name || step.label || 'Workflow Decision';
+            let isTerminal = false;
+            
+            // Helper to try resolving an edge to an action name
+            const tryResolveAction = (targetIndex?: number) => {
+              if (targetIndex !== undefined && steps[targetIndex]) {
+                const targetStep = steps[targetIndex];
+                if (targetStep.type === 'action' && targetStep.actions?.[0]) {
+                  isTerminal = true;
+                  const actionId = targetStep.actions[0].action_id;
+                  if (actionsRegistry.has(actionId)) {
+                    actionName = actionsRegistry.get(actionId)!;
+                  } else if (targetStep.label || targetStep.name) {
+                    actionName = targetStep.label || targetStep.name || actionName;
+                  }
+                }
+              }
+            };
+
+            // Check primary and true edges for action routing
+            tryResolveAction(edge.next_step_id);
+            tryResolveAction(edge.true_edge_id);
+
             rules.push({
               id: `rule-${wfIdx}-${stepIdx}-${edgeIdx}`,
-              description: step.name || step.label || 'Workflow Decision',
+              description: actionName,
               name: edge.name || edge.condition.plaintext,
               condition: edge.condition.plaintext,
-              mappedAction: edge.name || 'Decision'
+              mappedAction: actionName,
+              isTerminal: isTerminal
             });
           }
         });

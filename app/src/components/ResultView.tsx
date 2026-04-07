@@ -145,7 +145,7 @@ export default function ResultView({ sampleData, schema, rules, config, external
               const isDone = current >= target;
               return (
                 <div key={outcome} style={{ 
-                  background: 'rgba(15, 23, 42, 0.4)', 
+                  background: 'var(--field-bg)', 
                   border: `1px solid ${isDone ? 'var(--success)' : 'var(--border)'}`, 
                   padding: '1.25rem', 
                   borderRadius: '8px' 

@@ -211,8 +211,8 @@ function App() {
             aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
             id="theme-toggle-btn"
           >
-            {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
-            {theme === 'dark' ? 'Light' : 'Dark'}
+            {theme === 'dark' ? <Moon size={14} /> : <Sun size={14} />}
+            {theme === 'dark' ? 'Dark' : 'Light'}
           </button>
         </div>
       </header>

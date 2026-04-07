@@ -10,6 +10,7 @@ interface ConfigureDataProps {
 
 export default function ConfigureData({ schema, onConfirm, onBack }: ConfigureDataProps) {
   const [localSchema, setLocalSchema] = useState<SchemaField[]>(structuredClone(schema));
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   const [localValuesText, setLocalValuesText] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
@@ -45,8 +46,15 @@ export default function ConfigureData({ schema, onConfirm, onBack }: ConfigureDa
 
   const openGleanPrompt = (field: SchemaField) => {
     const prompt = `I am configuring synthetic test data. I need an array of 15 realistic values for a field named "${field.key}" of type "${field.type}". Here is an example value for context: ${JSON.stringify(field.example)}. Please return ONLY a valid JSON array of these values, with no markdown formatting or extra text.`;
-    const url = `https://app.glean.com/chat?prompt=${encodeURIComponent(prompt)}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+    // Copy prompt to clipboard so user can paste it into Glean
+    navigator.clipboard.writeText(prompt).catch(() => {
+      // Fallback: silently ignore if clipboard access is denied
+    });
+    // Open Glean Chat (prompt passed via clipboard, not URL)
+    window.open('https://app.glean.com/chat', '_blank', 'noopener,noreferrer');
+    // Show brief "Copied!" confirmation on the button
+    setCopiedField(field.key);
+    setTimeout(() => setCopiedField(null), 2000);
   };
 
   const renderFieldConfig = (field: SchemaField) => {
@@ -112,10 +120,10 @@ export default function ConfigureData({ schema, onConfirm, onBack }: ConfigureDa
                 className="btn btn-secondary" 
                 style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem', gap: '0.25rem', height: 'auto', minHeight: 'auto' }}
                 onClick={() => openGleanPrompt(field)}
-                title="Open AI Prompt in Glean Chat"
+                title="Copy AI prompt to clipboard and open Glean Chat"
               >
                 <Wand2 size={12} />
-                AI Prompt
+                {copiedField === field.key ? 'Copied!' : 'AI Prompt'}
               </button>
             </div>
             <input 

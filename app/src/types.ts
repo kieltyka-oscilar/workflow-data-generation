@@ -47,6 +47,7 @@ export interface Rule {
   name: string; // This is the RULE NAME (plaintext condition)
   condition: string;
   mappedAction?: string;
+  isTerminal?: boolean; // True if this rule leads directly to a final outcome action
 }
 
 export interface SchemaField {
