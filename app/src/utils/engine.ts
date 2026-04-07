@@ -1,3 +1,4 @@
+import { faker } from '@faker-js/faker';
 import type { Workflow, Rule, WorkflowStep, SchemaField } from '../types';
 
 // ─── Shared type aliases for dynamic JSON data ──────────────────────────────
@@ -366,6 +367,34 @@ export function markOptionalFromRules(schema: SchemaField[], rules: Rule[]): Sch
   return nextSchema;
 }
 
+// ─── getFakerValue ────────────────────────────────────────────────────────────
+
+/** Generates context-aware string values using faker.js */
+function getFakerValue(key: string, baseValue?: string, example?: string): string {
+  const norm = key.toLowerCase();
+  
+  if (norm.includes('first_name')) return faker.person.firstName();
+  if (norm.includes('last_name')) return faker.person.lastName();
+  if (norm.includes('email')) return faker.internet.email();
+  if (norm.includes('phone')) return faker.phone.number({ style: 'national' });
+  if (norm.includes('address_street1') || norm.includes('street')) return faker.location.streetAddress();
+  if (norm.includes('city')) return faker.location.city();
+  if (norm.includes('state')) return faker.location.state({ abbreviated: true });
+  if (norm.includes('zip')) return faker.location.zipCode();
+  if (norm.includes('country_code')) return faker.location.countryCode('alpha-2');
+  if (norm.includes('ssn') || norm.includes('social')) return faker.helpers.fromRegExp(/[0-9]{3}-[0-9]{2}-[0-9]{4}/);
+  if (norm.includes('dob') || norm.includes('birth')) return faker.date.birthdate().toISOString().split('T')[0];
+  if (norm.includes('ip_address')) return faker.internet.ipv4();
+  if (norm.includes('deviceid')) return faker.string.uuid().replace(/-/g, '');
+  if (norm.includes('timestamp')) return faker.date.recent().toISOString();
+  if (norm.includes('company')) return faker.company.name();
+  
+  // If we couldn't infer context, return baseValue if it exists
+  if (baseValue !== undefined) return baseValue;
+  if (example !== undefined) return example;
+  return faker.word.sample();
+}
+
 // ─── fuzzData ─────────────────────────────────────────────────────────────────
 
 export function fuzzData(baseSample: JsonRecord, schema?: SchemaField[], constraints?: Constraint[]): JsonRecord {
@@ -385,6 +414,8 @@ export function fuzzData(baseSample: JsonRecord, schema?: SchemaField[], constra
           fuzzed[key] = Math.random() > 0.5;
         } else if (typeof baseSample[key] === 'object' && baseSample[key] !== null) {
           fuzzed[key] = fuzzData(baseSample[key] as JsonRecord);
+        } else if (typeof baseSample[key] === 'string') {
+          fuzzed[key] = getFakerValue(key, baseSample[key] as string);
         } else {
           fuzzed[key] = baseSample[key];
         }
@@ -420,7 +451,7 @@ export function fuzzData(baseSample: JsonRecord, schema?: SchemaField[], constra
       } else if (field.type === 'boolean') {
         fuzzed[key] = Math.random() > 0.5;
       } else if (field.type === 'string') {
-        fuzzed[key] = typeof baseValue === 'string' ? baseValue : ((field.example as string) || 'sample_string');
+        fuzzed[key] = getFakerValue(key, typeof baseValue === 'string' ? baseValue : undefined, field.example as string | undefined);
       } else {
         fuzzed[key] = baseValue ?? null;
       }
