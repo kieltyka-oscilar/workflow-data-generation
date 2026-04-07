@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Save } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Save, Sun, Moon } from 'lucide-react';
 import type { Workflow, Rule, SchemaField, GeneratedConfig, ProjectState } from './types';
 import StepIndicator from './components/StepIndicator';
 import InitialUpload from './components/InitialUpload';
@@ -20,8 +20,37 @@ const STEPS = [
   'Generate'
 ];
 
+type Theme = 'dark' | 'light';
+
+function getInitialTheme(): Theme {
+  const stored = localStorage.getItem('theme') as Theme | null;
+  if (stored === 'dark' || stored === 'light') return stored;
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+
 function App() {
   const [currentStep, setCurrentStep] = useState(0);
+  const [theme, setTheme] = useState<Theme>(getInitialTheme);
+
+  // Sync theme to <html> data-theme attribute
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  // Listen for OS-level preference changes (only applied if no manual override is stored)
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: light)');
+    const handler = (e: MediaQueryListEvent) => {
+      if (!localStorage.getItem('theme')) {
+        setTheme(e.matches ? 'light' : 'dark');
+      }
+    };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
+  const toggleTheme = () => setTheme((t: Theme) => (t === 'dark' ? 'light' : 'dark'));
 
   // App State
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
@@ -48,7 +77,7 @@ function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `test-gen-project-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `workflow-data-gen-project-${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -166,16 +195,26 @@ function App() {
   return (
     <div className="container animate-fade-in" style={{ padding: '3rem 1rem', maxWidth: '1000px', margin: '0 auto' }}>
       <header style={{ marginBottom: '3rem', textAlign: 'center', position: 'relative' }}>
-        <h1 className="title">Synthetic data generator</h1>
+        <h1 className="title">Workflow data generator</h1>
         <p className="subtitle">Generate test data to pass/fail rules</p>
 
-        {workflow && (
-          <div style={{ position: 'absolute', top: 0, right: 0 }}>
+        <div style={{ position: 'absolute', top: 0, right: 0, display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          {workflow && (
             <button className="btn btn-secondary" onClick={saveProject} title="Save Project Setup" aria-label="Save project setup to file">
               <Save size={18} /> Save Setup
             </button>
-          </div>
-        )}
+          )}
+          <button
+            className="theme-toggle"
+            onClick={toggleTheme}
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            id="theme-toggle-btn"
+          >
+            {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+            {theme === 'dark' ? 'Light' : 'Dark'}
+          </button>
+        </div>
       </header>
 
       <StepIndicator

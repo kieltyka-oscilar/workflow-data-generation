@@ -2,7 +2,7 @@
 set -e
 
 # ─────────────────────────────────────────────
-#  Synthetic Test Generator — install & launch
+#  Workflow Data Generator — install & launch
 # ─────────────────────────────────────────────
 
 CYAN='\033[0;36m'
@@ -12,7 +12,7 @@ NC='\033[0m' # No Color
 
 echo -e "${CYAN}"
 echo "  ╔══════════════════════════════════════╗"
-echo "  ║   Synthetic Test Generator — Setup   ║"
+echo "  ║   Workflow Data Generator — Setup   ║"
 echo "  ╚══════════════════════════════════════╝"
 echo -e "${NC}"
 
