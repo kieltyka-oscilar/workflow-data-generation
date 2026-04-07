@@ -19,11 +19,8 @@ git clone https://github.com/kieltyka-oscilar/workflow-data-generation
 # 2. Enter the project folder
 cd workflow-data-generation
 
-# 3. Make the script executable (first time only)
-chmod +x install.sh
-
-# 4. Run it!
-./install.sh
+# 3. Run it!
+bash install.sh
 ```
 
 ### Windows
