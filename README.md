@@ -60,9 +60,21 @@ You need two files to get started:
 | **Sample Test Set** | `.jsonl` | Real data records, one JSON object per line. Used to infer the data schema and as a fuzzing baseline. |
 
 **How to export a workflow**
+
 Open the workflow and click the gear button -> export
 
-<img width="892" height="636" alt="CleanShot 2026-04-07 at 16 22 30@2x" src="https://github.com/user-attachments/assets/839e4f38-fd24-4c43-a6e4-3240a9c98207" />
+<img width="450" height="300" alt="CleanShot 2026-04-07 at 16 22 30@2x" src="https://github.com/user-attachments/assets/839e4f38-fd24-4c43-a6e4-3240a9c98207" />
+
+**How to get the jsonl file for sample data schema**
+
+Click Test -> Run Test
+
+<img width="450" height="450" alt="CleanShot 2026-04-07 at 16 25 09@2x" src="https://github.com/user-attachments/assets/cc587c03-d5a8-466d-b50d-141edfe9ab5c" />
+
+Then Click Upload File and click Download JSONL template.
+
+<img width="450" height="450" alt="CleanShot 2026-04-07 at 16 25 21@2x" src="https://github.com/user-attachments/assets/e195cfe4-8c35-4605-84c6-6edfb9f27159" />
+
 
 **How to upload:** Click either upload box or drag-and-drop the file directly onto it. Once both files are loaded, click **Analyze and Proceed**.
 
