@@ -1,6 +1,6 @@
 # Workflow data generation
 
-Generate realistic, rule-constrained synthetic test data from your Oscilar workflow JSON and a real sample dataset — no backend required, runs entirely in your browser.
+Generate realistic test data from your Oscilar workflow JSON and a sample dataset.
 
 ---
 
@@ -45,6 +45,33 @@ The app walks you through **7 steps** to produce a `.jsonl` file filled with syn
 ```
 Upload Assets → Confirm Rules → Confirm Schema → Configure Data → Distribution → Preview → Generate
 ```
+
+### Context-Aware String Generation
+
+When a field is identified as a string, the generator inspects the field name (key) to intelligently generate context-appropriate data. It specifically looks for the following phrases in your keys to generate matching fake data:
+
+Names: first_name, last_name
+Contact Info: email, phone
+Address: address_street1, street, city, state, zip, country_code
+Personal/Identity: ssn, social, dob, birth
+Digital: ip_address, deviceid, timestamp
+Business: company
+If the generator doesn't recognize a specific keyword for strings, it will fall back to using an example value provided in the schema, the base sample value, or a randomized fake word.
+
+### Numeric Generation
+
+For number inputs, it generates bounded values based on any configured min or max rules in the schema, defaulting to large random numbers if no bounding configuration is available.
+
+### Booleans
+boolean fields are automatically generated dynamically as true/false using randomized splits for coverage.
+
+### Logical Rule Fuzzing
+In addition to basic typing, the data generator recognizes operator constraints from your workflows and alters the generated data to fit boundaries, including:
+
+Numbers close to defined integer/float boundaries (e.g., <=, >=, <, >)
+Equality/Inequality matchers (==, !=)
+List inclusions (IN, NOT IN)
+Null checks (IS NULL, IS NOT NULL)
 
 ---
 
