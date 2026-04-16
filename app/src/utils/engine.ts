@@ -217,47 +217,92 @@ export function extractRules(workflow: Workflow): Rule[] {
   workflow.workflows.forEach((wf, wfIdx) => {
     if (!wf.execution_graph?.steps) return;
     const steps = wf.execution_graph.steps;
-    
-    steps.forEach((step, stepIdx) => {
-      // Only extract rules from decision steps for now
-      if (step.type === 'decision' && step.edges) {
-        step.edges.forEach((edge, edgeIdx) => {
-          if (edge.condition?.plaintext) {
-            
-            // Default to step name/label if we can't trace to an action
-            let actionName = step.name || step.label || 'Workflow Decision';
-            let isTerminal = false;
-            
-            // Helper to try resolving an edge to an action name
-            const tryResolveAction = (targetIndex?: number) => {
-              if (targetIndex !== undefined && steps[targetIndex]) {
-                const targetStep = steps[targetIndex];
-                if (targetStep.type === 'action' && targetStep.actions?.[0]) {
-                  isTerminal = true;
-                  const actionId = targetStep.actions[0].action_id;
-                  if (actionsRegistry.has(actionId)) {
-                    actionName = actionsRegistry.get(actionId)!;
-                  } else if (targetStep.label || targetStep.name) {
-                    actionName = targetStep.label || targetStep.name || actionName;
-                  }
-                }
-              }
-            };
 
-            // Check primary and true edges for action routing
-            tryResolveAction(edge.next_step_id);
-            tryResolveAction(edge.true_edge_id);
+    /** Resolve a step index to an action name + terminal flag */
+    const resolveAction = (targetIndex?: number): { actionName: string; isTerminal: boolean } | null => {
+      if (targetIndex === undefined || !steps[targetIndex]) return null;
+      const targetStep = steps[targetIndex];
+      if (targetStep.type === 'action' && targetStep.actions?.[0]) {
+        const actionId = targetStep.actions[0].action_id;
+        const name = actionsRegistry.get(actionId)
+          ?? targetStep.label
+          ?? targetStep.name
+          ?? 'Workflow Decision';
+        return { actionName: name, isTerminal: true };
+      }
+      return null;
+    };
+
+    steps.forEach((step, stepIdx) => {
+      if (step.type !== 'decision' || !step.edges) return;
+
+      // Collect all plaintext conditions from this decision step
+      // so we can build a negated "default" rule later.
+      const allConditions: string[] = [];
+
+      step.edges.forEach((edge, edgeIdx) => {
+        if (!edge.condition?.plaintext) return;
+
+        const conditionText = edge.condition.plaintext;
+        allConditions.push(conditionText);
+
+        // --- Primary edge ---
+        const primary = resolveAction(edge.next_step_id) ?? resolveAction(edge.true_edge_id);
+        const actionName = primary?.actionName ?? step.label ?? step.name ?? 'Workflow Decision';
+        const isTerminal = primary?.isTerminal ?? false;
+
+        rules.push({
+          id: `rule-${wfIdx}-${stepIdx}-${edgeIdx}`,
+          description: actionName,
+          name: edge.name || conditionText,
+          condition: conditionText,
+          mappedAction: actionName,
+          isTerminal
+        });
+
+        // --- Else-if edges (nested branches) ---
+        if (edge.else_if_edges) {
+          edge.else_if_edges.forEach((elseIf, elseIfIdx) => {
+            if (!elseIf.condition?.plaintext) return;
+
+            const elseIfCondition = elseIf.condition.plaintext;
+            allConditions.push(elseIfCondition);
+
+            const elseIfAction = resolveAction(elseIf.next_step_id);
+            const elseIfActionName = elseIfAction?.actionName ?? step.label ?? step.name ?? 'Workflow Decision';
+            const elseIfTerminal = elseIfAction?.isTerminal ?? false;
 
             rules.push({
-              id: `rule-${wfIdx}-${stepIdx}-${edgeIdx}`,
-              description: actionName,
-              name: edge.name || edge.condition.plaintext,
-              condition: edge.condition.plaintext,
-              mappedAction: actionName,
-              isTerminal: isTerminal
+              id: `rule-${wfIdx}-${stepIdx}-${edgeIdx}-elif-${elseIfIdx}`,
+              description: elseIfActionName,
+              name: elseIfCondition,
+              condition: elseIfCondition,
+              mappedAction: elseIfActionName,
+              isTerminal: elseIfTerminal
             });
-          }
-        });
+          });
+        }
+      });
+
+      // --- Default / else path ---
+      // If the decision step has a default_step_id that points to a terminal
+      // action, create a rule whose condition is the negation of ALL the
+      // explicit edge conditions (i.e., "none of the above matched").
+      if (step.default_step_id !== undefined && allConditions.length > 0) {
+        const defaultAction = resolveAction(step.default_step_id);
+        if (defaultAction?.isTerminal) {
+          const negatedParts = allConditions.map(c => `NOT (${c})`);
+          const defaultCondition = negatedParts.join(' AND ');
+
+          rules.push({
+            id: `rule-${wfIdx}-${stepIdx}-default`,
+            description: defaultAction.actionName,
+            name: `Default: ${defaultAction.actionName}`,
+            condition: defaultCondition,
+            mappedAction: defaultAction.actionName,
+            isTerminal: true
+          });
+        }
       }
     });
   });
@@ -471,6 +516,7 @@ export function fuzzData(baseSample: JsonRecord, schema?: SchemaField[], constra
 export function evaluateCondition(condition: string, obj: JsonRecord, externalLists: ExternalLists = {}): boolean {
   try {
     const jsCondition = condition
+      .replace(/\bNOT\s*\(/g, '!(')
       .replace(/\bAND\b/g, '&&')
       .replace(/\bOR\b/g, '||')
       .replace(/\bIS NOT NULL\b/g, '!== null')

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Target, Activity, ArrowLeft, ArrowRight, List } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Target, Activity, ArrowLeft, ArrowRight, List, ToggleLeft, ToggleRight } from 'lucide-react';
 import type { Rule } from '../types';
 import { extractRequiredLists } from '../utils/engine';
 
@@ -19,6 +19,34 @@ export default function ConfirmRules({ rules: initialRules, externalLists, onCon
     });
     return initial;
   });
+
+  // Group rules by decision (description) and track which decisions are enabled.
+  // Default: terminal decisions ON, non-terminal OFF.
+  const decisionGroups = useMemo(() => {
+    const groups = new Map<string, Rule[]>();
+    localRules.forEach(r => {
+      const key = r.description;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(r);
+    });
+    return groups;
+  }, [localRules]);
+
+  const [enabledDecisions, setEnabledDecisions] = useState<Record<string, boolean>>(() => {
+    const init: Record<string, boolean> = {};
+    for (const [name, groupRules] of decisionGroups.entries()) {
+      // Enable if at least one rule in the group is terminal
+      init[name] = groupRules.some(r => r.isTerminal);
+    }
+    return init;
+  });
+
+  const toggleDecision = (name: string) => {
+    setEnabledDecisions(prev => ({ ...prev, [name]: !prev[name] }));
+  };
+
+  const enabledCount = Object.values(enabledDecisions).filter(Boolean).length;
+  const totalCount = decisionGroups.size;
 
   const requiredLists = extractRequiredLists(localRules);
 
@@ -48,7 +76,10 @@ export default function ConfirmRules({ rules: initialRules, externalLists, onCon
         parsedLists[list.listName] = [];
       }
     });
-    onConfirm(localRules, parsedLists);
+
+    // Only pass forward rules whose decision group is enabled
+    const filteredRules = localRules.filter(r => enabledDecisions[r.description]);
+    onConfirm(filteredRules, parsedLists);
   };
 
   return (
@@ -57,7 +88,7 @@ export default function ConfirmRules({ rules: initialRules, externalLists, onCon
         <button className="btn btn-secondary" onClick={onBack}>
           <ArrowLeft size={18} /> Back
         </button>
-        <button className="btn btn-primary" onClick={handleConfirm}>
+        <button className="btn btn-primary" onClick={handleConfirm} disabled={enabledCount === 0}>
           Looks Good, Proceed <ArrowRight size={18} />
         </button>
       </div>
@@ -99,7 +130,10 @@ export default function ConfirmRules({ rules: initialRules, externalLists, onCon
 
       <div style={{ marginBottom: '2rem', textAlign: 'center' }}>
         <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>Workflow Decisions & Rules</h2>
-        <p>We've identified {localRules.length} rule conditions across {new Set(localRules.map(r => r.description)).size} decisions.</p>
+        <p>We've identified {localRules.length} rule conditions across {totalCount} decisions. <strong>{enabledCount}</strong> enabled.</p>
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+          Toggle decisions on/off to control which outcomes are used for data generation.
+        </p>
       </div>
 
       <div style={{ 
@@ -111,57 +145,100 @@ export default function ConfirmRules({ rules: initialRules, externalLists, onCon
         flexDirection: 'column',
         gap: '1.5rem'
       }}>
-        {Array.from(new Set(localRules.map(r => r.description))).map((rulesetName) => {
-          const rulesInSet = localRules.filter(r => r.description === rulesetName);
+        {Array.from(decisionGroups.entries()).map(([rulesetName, rulesInSet]) => {
+          const isEnabled = enabledDecisions[rulesetName] ?? false;
+          const hasTerminal = rulesInSet.some(r => r.isTerminal);
           return (
             <div key={rulesetName} style={{ 
               background: 'var(--field-bg)', 
-              border: '1px solid var(--border)', 
+              border: `1px solid ${isEnabled ? 'var(--border)' : 'rgba(128,128,128,0.2)'}`,
               borderRadius: '12px',
               padding: '1.5rem',
               display: 'flex',
               flexDirection: 'column',
-              gap: '1.25rem'
+              gap: '1.25rem',
+              opacity: isEnabled ? 1 : 0.5,
+              transition: 'opacity 0.2s ease, border-color 0.2s ease'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <div style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)', padding: '0.5rem', borderRadius: '8px', color: 'var(--primary)' }}>
-                  <Target size={20} />
-                </div>
-                <div>
-                  <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', fontWeight: 700, marginBottom: '0.2rem' }}>
-                    Decision
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)', padding: '0.5rem', borderRadius: '8px', color: 'var(--primary)' }}>
+                    <Target size={20} />
                   </div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                    {rulesetName}
+                  <div>
+                    <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', fontWeight: 700, marginBottom: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      Decision
+                      {!hasTerminal && (
+                        <span style={{ 
+                          fontSize: '0.65rem', 
+                          background: 'rgba(250, 204, 21, 0.15)', 
+                          color: '#facc15', 
+                          padding: '1px 6px', 
+                          borderRadius: '4px',
+                          textTransform: 'none',
+                          letterSpacing: 'normal',
+                          fontWeight: 600 
+                        }}>
+                          Intermediate
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      {rulesetName}
+                    </div>
                   </div>
                 </div>
+
+                <button
+                  onClick={() => toggleDecision(rulesetName)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: isEnabled ? 'var(--primary)' : 'var(--text-secondary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    padding: '0.4rem 0.75rem',
+                    borderRadius: '6px',
+                    transition: 'background 0.15s ease'
+                  }}
+                  title={isEnabled ? 'Click to exclude this decision' : 'Click to include this decision'}
+                >
+                  {isEnabled ? <ToggleRight size={22} /> : <ToggleLeft size={22} />}
+                  {isEnabled ? 'Enabled' : 'Disabled'}
+                </button>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                {rulesInSet.map((rule, idx) => (
-                  <div key={rule.id} style={{ 
-                    background: 'var(--container-bg)', 
-                    padding: '1.25rem', 
-                    borderRadius: '10px', 
-                    border: '1px solid var(--border)',
-                    position: 'relative'
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.75rem', color: 'var(--primary)', fontSize: '0.95rem', fontWeight: 600 }}>
-                      <Activity size={16} /> Rule Condition {rulesInSet.length > 1 ? `#${idx + 1}` : ''}
-                    </div>
-                    
-                    <div style={{ fontSize: '1.05rem', color: 'var(--text-primary)', lineHeight: 1.5, marginBottom: '1rem' }}>
-                      <span style={{ background: 'var(--container-bg)', padding: '2px 8px', borderRadius: '4px', border: '1px solid var(--border)' }}>
-                        {rule.name}
-                      </span>
-                    </div>
+              {isEnabled && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {rulesInSet.map((rule, idx) => (
+                    <div key={rule.id} style={{ 
+                      background: 'var(--container-bg)', 
+                      padding: '1.25rem', 
+                      borderRadius: '10px', 
+                      border: '1px solid var(--border)',
+                      position: 'relative'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.75rem', color: 'var(--primary)', fontSize: '0.95rem', fontWeight: 600 }}>
+                        <Activity size={16} /> Rule Condition {rulesInSet.length > 1 ? `#${idx + 1}` : ''}
+                      </div>
+                      
+                      <div style={{ fontSize: '1.05rem', color: 'var(--text-primary)', lineHeight: 1.5, marginBottom: '1rem' }}>
+                        <span style={{ background: 'var(--container-bg)', padding: '2px 8px', borderRadius: '4px', border: '1px solid var(--border)' }}>
+                          {rule.name}
+                        </span>
+                      </div>
 
-                    <div style={{ fontSize: '0.85rem', fontFamily: 'monospace', color: 'var(--text-secondary)', background: 'var(--container-bg)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)', overflowX: 'auto' }}>
-                      {rule.condition}
+                      <div style={{ fontSize: '0.85rem', fontFamily: 'monospace', color: 'var(--text-secondary)', background: 'var(--container-bg)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)', overflowX: 'auto' }}>
+                        {rule.condition}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}

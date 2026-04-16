@@ -32,6 +32,15 @@ export interface WorkflowStep {
   default_step_id?: number;
 }
 
+export interface ElseIfEdge {
+  condition?: {
+    plaintext: string;
+  };
+  edge_id?: number;
+  next_step_id?: number;
+  assignments?: unknown[];
+}
+
 export interface Edge {
   name?: string;
   condition?: {
@@ -39,6 +48,9 @@ export interface Edge {
   };
   true_edge_id?: number;
   next_step_id?: number;
+  else_if_edges?: ElseIfEdge[];
+  else_edge_id?: number;
+  else_assignments?: unknown[];
 }
 
 export interface Rule {

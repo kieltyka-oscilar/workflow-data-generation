@@ -53,8 +53,12 @@ export default function GenerateConfig({ rules, config, setConfig, onConfirm, on
   useEffect(() => {
     if (outcomes.length === 0) return;
     const init: Record<string, number> = {};
-    outcomes.forEach((o, i) => {
-      init[o] = i === 0 ? 50 : 10; // sensible starter for first outcome
+    const base = Math.floor(100 / outcomes.length);
+    let remainder = 100 - (base * outcomes.length);
+    
+    outcomes.forEach((o) => {
+      init[o] = base + (remainder > 0 ? 1 : 0);
+      remainder--;
     });
     setPercentages(init);
   }, [outcomes]);
@@ -100,7 +104,7 @@ export default function GenerateConfig({ rules, config, setConfig, onConfirm, on
         <button
           className="btn btn-primary"
           onClick={onConfirm}
-          disabled={totalCases === 0}
+          disabled={totalCases === 0 || totalPct !== 100}
         >
           Preview Generated Data <ArrowRight size={18} />
         </button>
@@ -186,7 +190,7 @@ export default function GenerateConfig({ rules, config, setConfig, onConfirm, on
                 <input
                   type="range"
                   min="0"
-                  max="100"
+                  max={Math.min(100, 100 - totalPct + pct)}
                   step="1"
                   value={pct}
                   onChange={e => handlePercentageChange(outcome, parseInt(e.target.value, 10))}
@@ -198,7 +202,7 @@ export default function GenerateConfig({ rules, config, setConfig, onConfirm, on
                   <input
                     type="number"
                     min="0"
-                    max="100"
+                    max={Math.min(100, 100 - totalPct + pct)}
                     value={pct}
                     onChange={e => handlePercentageChange(outcome, parseInt(e.target.value, 10) || 0)}
                     className="form-input"
