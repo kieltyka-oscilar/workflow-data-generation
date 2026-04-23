@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Play, ArrowLeft, ArrowRight, Dna, CheckCircle, AlertTriangle, XCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import type { Workflow, Rule, SchemaField, GeneratedConfig } from '../types';
-import { fuzzData, pruneToSchema, extractConstraints, invertConstraints, buildAntiConstraints, simulateWorkflow, type JsonRecord } from '../utils/engine';
+import { fuzzData, pruneToSchema, extractConstraints, invertConstraints, buildAntiConstraints, simulateWorkflow, extractKnownStringValues, type JsonRecord } from '../utils/engine';
 
 interface PreviewGenerationProps {
   workflow: Workflow;
@@ -313,13 +313,15 @@ export default function PreviewGeneration({ workflow, rules, sampleData, schema,
           }
         });
 
+        const knownValues = extractKnownStringValues(rules);
+
         targetOutcomes.forEach(outcome => {
           const constraints = outcomeConstraints[outcome];
           let clean: Record<string, unknown> | null = null;
 
-          for (let attempt = 0; attempt < 50; attempt++) {
+          for (let attempt = 0; attempt < 5000; attempt++) {
             const base = sampleData[Math.floor(Math.random() * sampleData.length)] || {};
-            const fuzzed = fuzzData(base, schema, constraints);
+            const fuzzed = fuzzData(base, schema, constraints, knownValues);
             const candidate = pruneToSchema(fuzzed, schema);
 
             try {
@@ -335,7 +337,7 @@ export default function PreviewGeneration({ workflow, rules, sampleData, schema,
           
           if (!clean) {
             const base = sampleData[Math.floor(Math.random() * sampleData.length)] || {};
-            const fuzzed = fuzzData(base, schema, constraints);
+            const fuzzed = fuzzData(base, schema, constraints, knownValues);
             clean = pruneToSchema(fuzzed, schema);
           }
 

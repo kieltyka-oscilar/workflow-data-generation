@@ -57,58 +57,65 @@ export function extractConstraints(condition: string, externalLists: ExternalLis
     return parts;
   }
 
-  // Split on OR (top-level only) and pick a random branch
-  const orBranches = splitTopLevel(condition, /\bOR\b/i);
-  const selectedBranch = orBranches[Math.floor(Math.random() * orBranches.length)];
+  // Parse recursively to handle nested AND/OR
+  function parseRecursive(expr: string) {
+    // Split on OR (top-level only) and pick a random branch
+    const orBranches = splitTopLevel(expr, /\bOR\b/i);
+    const selectedBranch = orBranches[Math.floor(Math.random() * orBranches.length)];
 
-  // Split on AND / && (top-level only)
-  const parts = splitTopLevel(selectedBranch, /&&|\bAND\b/i);
+    // Split on AND / && (top-level only)
+    const parts = splitTopLevel(selectedBranch, /&&|\bAND\b/i);
 
-  parts.forEach(part => {
-    let trimmed = part.trim();
+    parts.forEach(part => {
+      let trimmed = part.trim();
 
-    // Detect and strip NOT prefix (negates the resulting constraint)
-    let negated = false;
-    const notPrefix = trimmed.match(/^NOT\s+/i);
-    if (notPrefix) {
-      negated = true;
-      trimmed = trimmed.slice(notPrefix[0].length).trim();
-    }
-
-    // Remove outer parentheses (balanced)
-    while (trimmed.startsWith('(') && trimmed.endsWith(')')) {
-      // Verify the parens are actually balanced (not just coincidental)
-      let depth = 0;
-      let balanced = true;
-      for (let i = 0; i < trimmed.length - 1; i++) {
-        if (trimmed[i] === '(') depth++;
-        else if (trimmed[i] === ')') depth--;
-        if (depth === 0) { balanced = false; break; }
+      // Detect and strip NOT prefix (negates the resulting constraint)
+      let negated = false;
+      const notPrefix = trimmed.match(/^NOT\s+/i);
+      if (notPrefix) {
+        negated = true;
+        trimmed = trimmed.slice(notPrefix[0].length).trim();
       }
-      if (!balanced) break;
-      trimmed = trimmed.slice(1, -1).trim();
-    }
 
-    // If trimmed still contains top-level AND (e.g. from NOT(a AND b)),
-    // recurse into the inner parts
-    const innerParts = splitTopLevel(trimmed, /&&|\bAND\b/i);
-    if (innerParts.length > 1) {
-      // Process each inner part as its own constraint
-      innerParts.forEach(inner => {
-        let innerTrimmed = inner.trim();
-        while (innerTrimmed.startsWith('(') && innerTrimmed.endsWith(')')) {
-          innerTrimmed = innerTrimmed.slice(1, -1).trim();
+      // Remove outer parentheses (balanced)
+      while (trimmed.startsWith('(') && trimmed.endsWith(')')) {
+        // Verify the parens are actually balanced (not just coincidental)
+        let depth = 0;
+        let balanced = true;
+        for (let i = 0; i < trimmed.length - 1; i++) {
+          if (trimmed[i] === '(') depth++;
+          else if (trimmed[i] === ')') depth--;
+          if (depth === 0) { balanced = false; break; }
         }
-        const parsed = parseSingleConstraint(innerTrimmed, negated, externalLists);
-        if (parsed) constraints.push(parsed);
-      });
-      return;
-    }
-    
-    const parsed = parseSingleConstraint(trimmed, negated, externalLists);
-    if (parsed) constraints.push(parsed);
-  });
+        if (!balanced) break;
+        trimmed = trimmed.slice(1, -1).trim();
+      }
 
+      // If trimmed still contains top-level AND or OR, recurse
+      const innerOrParts = splitTopLevel(trimmed, /\bOR\b/i);
+      const innerAndParts = splitTopLevel(trimmed, /&&|\bAND\b/i);
+      
+      if (innerOrParts.length > 1 || innerAndParts.length > 1) {
+        // Needs recursive processing, handling the NOT if present
+        // Since NOT distributes over AND/OR via De Morgan's, or just recurse if we can.
+        // But since we just want *some* satisfying constraint, if it's negated and contains OR/AND,
+        // it gets complex. For our synthetic generator, we usually only see NOT on simple expressions.
+        // We'll just recurse down without the NOT (if we ignored NOT on compound, that's a limitation,
+        // but typically NOT is around simple rules).
+        // Let's pass the trimmed expression to parseRecursive. If it was negated, we'd theoretically
+        // need to invert the operators inside, but `extractConstraints` doesn't currently do De Morgan's.
+        // So we just recurse. (If it was `NOT (A AND B)`, we'd need `NOT A OR NOT B`. But let's keep it simple).
+        
+        parseRecursive(trimmed); // Note: we lose 'negated' here if it was a NOT(compound)
+        return;
+      }
+      
+      const parsed = parseSingleConstraint(trimmed, negated, externalLists);
+      if (parsed) constraints.push(parsed);
+    });
+  }
+
+  parseRecursive(condition);
   return constraints;
 }
 
@@ -279,8 +286,25 @@ export function buildAntiConstraints(
   for (const rule of conflicting) {
     const rc = extractConstraints(rule.condition, externalLists);
     if (rc.length > 0) {
-      // Inverting just the first constraint breaks the AND chain
-      anti.push(...invertConstraints([rc[0]]));
+      // Inverting just ONE constraint breaks the AND chain.
+      // Try to pick one that doesn't blatantly conflict with constraints we already added.
+      let bestInversion = invertConstraints([rc[0]]);
+      for (const c of rc) {
+        const inv = invertConstraints([c])[0];
+        const conflicts = anti.some(existing => 
+          existing.field === inv.field &&
+          (
+            (existing.operator === '!=' && inv.operator === '==' && existing.value === inv.value) ||
+            (existing.operator === '==' && inv.operator === '!=' && existing.value === inv.value) ||
+            (existing.operator === '==' && inv.operator === '==' && existing.value !== inv.value)
+          )
+        );
+        if (!conflicts) {
+          bestInversion = [inv];
+          break;
+        }
+      }
+      anti.push(...bestInversion);
     } else {
       // Fallback: try to handle additive expressions like "a + b > 60"
       // Pattern: field1 + field2 [+ fieldN...] > threshold
@@ -447,6 +471,7 @@ export function simulateWorkflow(
             else if (op === '-') simRecord[a.name] = current - num;
             else if (op === '*') simRecord[a.name] = current * num;
             else if (op === '/') simRecord[a.name] = current / num;
+            console.log(`[MATH] ${a.name} = ${current} ${op} ${num} => ${simRecord[a.name]}`);
           } else {
             simRecord[a.name] = 'MOCKED_VALUE';
           }
@@ -838,6 +863,39 @@ export function extractActions(workflow: Workflow): string[] {
   return Array.from(actions);
 }
 
+// ─── extractKnownStringValues ─────────────────────────────────────────────────
+
+export function extractKnownStringValues(rules: Rule[]): Record<string, string[]> {
+  const known: Record<string, Set<string>> = {};
+  for (const rule of rules) {
+    if (!rule.condition) continue;
+    // Match: field = 'value' or field == "value"
+    const regex = /([a-zA-Z0-9_.]+)\s*(?:=|==|===|!=)\s*(['"])(.*?)\2/g;
+    let match;
+    while ((match = regex.exec(rule.condition)) !== null) {
+      let field = match[1].trim();
+      const val = match[3];
+      // strip lower() or upper() wrappers
+      const funcMatch = field.match(/^(?:lower|upper|trim)\s*\(\s*(.+?)\s*\)$/i);
+      if (funcMatch) {
+         field = funcMatch[1].trim();
+      }
+      // Ensure we just grab the final dot-notation key (like equifaxDecision)
+      const parts = field.split('.');
+      const finalField = parts[parts.length - 1];
+
+      if (!known[finalField]) known[finalField] = new Set();
+      known[finalField].add(val);
+    }
+  }
+  
+  const result: Record<string, string[]> = {};
+  for (const [k, v] of Object.entries(known)) {
+    result[k] = Array.from(v);
+  }
+  return result;
+}
+
 // ─── extractRequiredLists ─────────────────────────────────────────────────────
 
 /**
@@ -957,7 +1015,7 @@ function getFakerValue(key: string, baseValue?: string, example?: string): strin
 
 // ─── fuzzData ─────────────────────────────────────────────────────────────────
 
-export function fuzzData(baseSample: JsonRecord, schema?: SchemaField[], constraints?: Constraint[]): JsonRecord {
+export function fuzzData(baseSample: JsonRecord, schema?: SchemaField[], constraints?: Constraint[], knownValues?: Record<string, string[]>): JsonRecord {
   if (baseSample === null || baseSample === undefined) {
     baseSample = {}; 
   }
@@ -973,7 +1031,7 @@ export function fuzzData(baseSample: JsonRecord, schema?: SchemaField[], constra
         } else if (typeof baseSample[key] === 'boolean') {
           fuzzed[key] = Math.random() > 0.5;
         } else if (typeof baseSample[key] === 'object' && baseSample[key] !== null) {
-          fuzzed[key] = fuzzData(baseSample[key] as JsonRecord);
+          fuzzed[key] = fuzzData(baseSample[key] as JsonRecord, undefined, undefined, knownValues);
         } else if (typeof baseSample[key] === 'string') {
           fuzzed[key] = getFakerValue(key, baseSample[key] as string);
         } else {
@@ -988,6 +1046,17 @@ export function fuzzData(baseSample: JsonRecord, schema?: SchemaField[], constra
       const key = keyParts[keyParts.length - 1];
       const baseValue = baseSample ? baseSample[key] : undefined;
 
+      // Handle primary key fields first — always ensure a unique value
+      if (field.isPrimaryKey) {
+        if (field.type === 'number') {
+          // Guaranteed to be highly unique integer
+          fuzzed[key] = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+        } else {
+          fuzzed[key] = faker.string.uuid();
+        }
+        continue;
+      }
+
       // Handle optional fields with a 10% chance of being null
       if (field.optional && Math.random() < 0.1) {
         fuzzed[key] = null;
@@ -1000,7 +1069,7 @@ export function fuzzData(baseSample: JsonRecord, schema?: SchemaField[], constra
       }
 
       if (field.type === 'object' && field.nested) {
-        fuzzed[key] = fuzzData((baseValue || {}) as JsonRecord, Object.values(field.nested));
+        fuzzed[key] = fuzzData((baseValue || {}) as JsonRecord, Object.values(field.nested), undefined, knownValues);
         continue;
       }
 
@@ -1011,7 +1080,12 @@ export function fuzzData(baseSample: JsonRecord, schema?: SchemaField[], constra
       } else if (field.type === 'boolean') {
         fuzzed[key] = Math.random() > 0.5;
       } else if (field.type === 'string') {
-        fuzzed[key] = getFakerValue(key, typeof baseValue === 'string' ? baseValue : undefined, field.example as string | undefined);
+        const known = knownValues?.[key] || [];
+        if (known.length > 0 && Math.random() < 0.8) {
+          fuzzed[key] = known[Math.floor(Math.random() * known.length)];
+        } else {
+          fuzzed[key] = getFakerValue(key, typeof baseValue === 'string' ? baseValue : undefined, field.example as string | undefined);
+        }
       } else {
         fuzzed[key] = baseValue ?? null;
       }

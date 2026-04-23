@@ -66,6 +66,7 @@ export interface SchemaField {
   key: string;
   type: 'string' | 'number' | 'boolean' | 'object' | 'array';
   optional?: boolean;
+  isPrimaryKey?: boolean;
   nested?: Record<string, SchemaField>;
   example?: unknown;
   config?: {

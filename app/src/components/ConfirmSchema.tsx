@@ -66,6 +66,36 @@ export default function ConfirmSchema({ schema: initialSchema, onConfirm, onBack
     setLocalSchema(nextSchema);
   };
 
+  const togglePrimaryKey = (key: string) => {
+    const nextSchema = structuredClone(localSchema) as SchemaField[];
+    let wasEnabled = false;
+    
+    const clearAll = (fields: SchemaField[]) => {
+      for (const f of fields) {
+        if (f.key === key) wasEnabled = f.isPrimaryKey || false;
+        f.isPrimaryKey = false;
+        if (f.nested) clearAll(Object.values(f.nested));
+      }
+    };
+    clearAll(nextSchema);
+
+    if (!wasEnabled) {
+      const enableKey = (fields: SchemaField[]) => {
+        for (const f of fields) {
+          if (f.key === key) {
+            f.isPrimaryKey = true;
+            return true;
+          }
+          if (f.nested && enableKey(Object.values(f.nested))) return true;
+        }
+        return false;
+      };
+      enableKey(nextSchema);
+    }
+    
+    setLocalSchema(nextSchema);
+  };
+
   const getTypeIcon = (type: string) => {
     switch(type) {
       case 'string': return <Type size={16} color="#3b82f6" />;
@@ -98,6 +128,18 @@ export default function ConfirmSchema({ schema: initialSchema, onConfirm, onBack
           </div>
             
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            {(field.type === 'string' || field.type === 'number') && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                <input 
+                  type="checkbox" 
+                  checked={field.isPrimaryKey || false} 
+                  onChange={() => togglePrimaryKey(field.key)}
+                  style={{ cursor: 'pointer' }}
+                />
+                <span style={{ color: field.isPrimaryKey ? 'var(--primary)' : 'inherit', fontWeight: field.isPrimaryKey ? 600 : 400 }}>Primary Key</span>
+              </label>
+            )}
+
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: 'var(--text-secondary)', cursor: 'pointer' }}>
               <input 
                 type="checkbox" 

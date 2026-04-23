@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { CirclePlay, Download, CircleCheck, RefreshCcw } from 'lucide-react';
 import type { Workflow, Rule, SchemaField, GeneratedConfig } from '../types';
-import { fuzzData, pruneToSchema, extractConstraints, invertConstraints, buildAntiConstraints, simulateWorkflow } from '../utils/engine';
+import { fuzzData, pruneToSchema, extractConstraints, invertConstraints, buildAntiConstraints, simulateWorkflow, extractKnownStringValues } from '../utils/engine';
 
 interface ResultViewProps {
   workflow: Workflow;
@@ -14,7 +14,7 @@ interface ResultViewProps {
 }
 
 const CHUNK_SIZE = 200; // records per animation frame
-const MAX_RETRIES = 50; // max regeneration attempts per record
+const MAX_RETRIES = 5000; // max regeneration attempts per record
 
 export default function ResultView({ workflow, sampleData, schema, rules, config, externalLists, onReset }: ResultViewProps) {
   const [isGenerating, setIsGenerating] = useState(false);
@@ -54,6 +54,8 @@ export default function ResultView({ workflow, sampleData, schema, rules, config
       }
     });
 
+    const knownValues = extractKnownStringValues(rules);
+
     // Flatten into a single work queue so we can chunk across outcomes
     const workQueue: { outcome: string; constraints: ReturnType<typeof extractConstraints> }[] = [];
     outcomesToGenerate.forEach(([outcome, count]) => {
@@ -76,7 +78,7 @@ export default function ResultView({ workflow, sampleData, schema, rules, config
           // Generate with retry: simulate the workflow and regenerate
           for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
             const base = sampleData[Math.floor(Math.random() * sampleData.length)] || {};
-            const fuzzed = fuzzData(base, schema, constraints);
+            const fuzzed = fuzzData(base, schema, constraints, knownValues);
             const candidate = pruneToSchema(fuzzed, schema);
 
             try {
@@ -95,7 +97,7 @@ export default function ResultView({ workflow, sampleData, schema, rules, config
           // If all retries failed, use the last attempt anyway
           if (!clean) {
             const base = sampleData[Math.floor(Math.random() * sampleData.length)] || {};
-            const fuzzed = fuzzData(base, schema, constraints);
+            const fuzzed = fuzzData(base, schema, constraints, knownValues);
             clean = pruneToSchema(fuzzed, schema);
           }
 
