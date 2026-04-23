@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Play, ArrowLeft, ArrowRight, Dna, CheckCircle, AlertTriangle, XCircle, ChevronDown, ChevronUp } from 'lucide-react';
-import type { Rule, SchemaField, GeneratedConfig } from '../types';
-import { fuzzData, pruneToSchema, extractConstraints, invertConstraints, type JsonRecord } from '../utils/engine';
+import type { Workflow, Rule, SchemaField, GeneratedConfig } from '../types';
+import { fuzzData, pruneToSchema, extractConstraints, invertConstraints, buildAntiConstraints, simulateWorkflow, type JsonRecord } from '../utils/engine';
 
 interface PreviewGenerationProps {
+  workflow: Workflow;
   rules: Rule[];
   sampleData: JsonRecord[];
   schema: SchemaField[];
@@ -280,7 +281,7 @@ function ValidationSummary({ results }: { results: ValidationResult[] }) {
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
-export default function PreviewGeneration({ rules, sampleData, schema, config, externalLists, onConfirm, onBack }: PreviewGenerationProps) {
+export default function PreviewGeneration({ workflow, rules, sampleData, schema, config, externalLists, onConfirm, onBack }: PreviewGenerationProps) {
   const [previews, setPreviews] = useState<JsonRecord[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [validations, setValidations] = useState<ValidationResult[]>([]);
@@ -291,41 +292,70 @@ export default function PreviewGeneration({ rules, sampleData, schema, config, e
     
     // We run in a non-blocking timeout to avoid UI freeze
     setTimeout(() => {
-      const results: JsonRecord[] = [];
-      const targetOutcomes = Object.keys(config).filter(k => (config[k] || 0) > 0);
-      
-      // Map each outcome to its constraints once
-      const outcomeConstraints: Record<string, ReturnType<typeof extractConstraints>> = {};
-      targetOutcomes.forEach(outcome => {
-        const rule = rules.find(r => r.description === outcome);
-        outcomeConstraints[outcome] = rule ? extractConstraints(rule.condition, externalLists) : [];
-      });
-
-      targetOutcomes.forEach(outcome => {
-        const constraints = outcomeConstraints[outcome];
-        const base = sampleData[Math.floor(Math.random() * sampleData.length)] || {};
+      try {
+        const results: JsonRecord[] = [];
+        const targetOutcomes = Object.keys(config).filter(k => (config[k] || 0) > 0);
         
-        let effectiveConstraints = constraints;
-        if (outcome === 'Default (No Match)') {
-            const allRuleConstraints = rules.flatMap(r => extractConstraints(r.condition, externalLists));
-            effectiveConstraints = invertConstraints(allRuleConstraints);
-        }
+        // Map each outcome to its constraints once
+        const outcomeConstraints: Record<string, ReturnType<typeof extractConstraints>> = {};
+        targetOutcomes.forEach(outcome => {
+          if (outcome === 'Default (No Match)') {
+              const allRuleConstraints = rules.flatMap(r => extractConstraints(r.condition, externalLists));
+              outcomeConstraints[outcome] = invertConstraints(allRuleConstraints);
+          } else {
+            // Merge constraints from ALL rules that map to this outcome
+            const categoryRules = rules.filter(r => r.description === outcome);
+            const targetConstraints = categoryRules.flatMap(r =>
+              extractConstraints(r.condition, externalLists)
+            );
+            const antiConstraints = buildAntiConstraints(outcome, rules, externalLists);
+            outcomeConstraints[outcome] = [...antiConstraints, ...targetConstraints];
+          }
+        });
 
-        const fuzzed = fuzzData(base, schema, effectiveConstraints);
-        const clean = pruneToSchema(fuzzed, schema);
-        results.push({ _outcome: outcome, ...clean });
-      });
+        targetOutcomes.forEach(outcome => {
+          const constraints = outcomeConstraints[outcome];
+          let clean: Record<string, unknown> | null = null;
 
-      setPreviews(results);
-      const valRes = results.map(r => {
-        const pure = { ...r };
-        delete pure._outcome;
-        return validateRecord(pure as Record<string, unknown>, schema);
-      });
-      setValidations(valRes);
-      setIsGenerating(false);
+          for (let attempt = 0; attempt < 50; attempt++) {
+            const base = sampleData[Math.floor(Math.random() * sampleData.length)] || {};
+            const fuzzed = fuzzData(base, schema, constraints);
+            const candidate = pruneToSchema(fuzzed, schema);
+
+            try {
+              const simResult = simulateWorkflow(candidate, workflow);
+              if (simResult === outcome) {
+                clean = candidate;
+                break;
+              }
+            } catch (err) {
+              console.error("Simulation error during preview:", err);
+            }
+          }
+          
+          if (!clean) {
+            const base = sampleData[Math.floor(Math.random() * sampleData.length)] || {};
+            const fuzzed = fuzzData(base, schema, constraints);
+            clean = pruneToSchema(fuzzed, schema);
+          }
+
+          results.push({ _outcome: outcome, ...clean });
+        });
+
+        setPreviews(results);
+        const valRes = results.map(r => {
+          const pure = { ...r };
+          delete pure._outcome;
+          return validateRecord(pure as Record<string, unknown>, schema);
+        });
+        setValidations(valRes);
+      } catch (err) {
+        console.error("Preview generation failed:", err);
+      } finally {
+        setIsGenerating(false);
+      }
     }, 10);
-  }, [sampleData, schema, config, rules, externalLists]);
+  }, [workflow, sampleData, schema, config, rules, externalLists]);
 
   const hasGenerated = useRef(false);
   useEffect(() => {

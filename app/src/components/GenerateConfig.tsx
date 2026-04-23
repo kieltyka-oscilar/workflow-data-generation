@@ -32,9 +32,8 @@ function randomPartsTo(n: number, total: number): number[] {
 
 export default function GenerateConfig({ rules, config, setConfig, onConfirm, onBack }: GenerateConfigProps) {
   const [outcomes, setOutcomes] = useState<string[]>([]);
-  // percentages: each outcome gets a value 0-100 (they don't have to sum to 100 — user controls freely)
-  const [percentages, setPercentages] = useState<Record<string, number>>({});
-  const [totalRecords, setTotalRecords] = useState<number>(500);
+  // counts: each outcome gets a direct record count (starts at 0)
+  const [counts, setCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     // Dynamic Outcomes based on Rules
@@ -49,51 +48,38 @@ export default function GenerateConfig({ rules, config, setConfig, onConfirm, on
     }
   }, [rules]);
 
-  // Initialise percentages when outcomes are first determined
+  // Initialise counts to 0 when outcomes are first determined
   useEffect(() => {
     if (outcomes.length === 0) return;
     const init: Record<string, number> = {};
-    const base = Math.floor(100 / outcomes.length);
-    let remainder = 100 - (base * outcomes.length);
-    
-    outcomes.forEach((o) => {
-      init[o] = base + (remainder > 0 ? 1 : 0);
-      remainder--;
-    });
-    setPercentages(init);
+    outcomes.forEach(o => { init[o] = 0; });
+    setCounts(init);
   }, [outcomes]);
 
-  // Sync derived counts back into config whenever percentages or totalRecords change
+  // Sync counts into config whenever they change
   useEffect(() => {
     if (outcomes.length === 0) return;
     const derived: GeneratedConfig = {};
-    outcomes.forEach(o => {
-      derived[o] = Math.round(((percentages[o] ?? 0) / 100) * totalRecords);
-    });
+    outcomes.forEach(o => { derived[o] = counts[o] ?? 0; });
     setConfig(derived);
-  }, [percentages, totalRecords, outcomes]);
+  }, [counts, outcomes]);
 
-  const handlePercentageChange = (outcome: string, val: number) => {
-    setPercentages(prev => ({ ...prev, [outcome]: Math.max(0, Math.min(100, val)) }));
+  const handleCountChange = (outcome: string, val: number) => {
+    setCounts(prev => ({ ...prev, [outcome]: Math.max(0, Math.min(100000, val)) }));
   };
 
   const handleRandomize = () => {
-    const parts = randomPartsTo(outcomes.length, 100);
-    const shuffled: Record<string, number> = {};
-    outcomes.forEach((o, i) => {
-      shuffled[o] = parts[i];
-    });
-    setPercentages(shuffled);
+    const total = totalCases > 0 ? totalCases : 500;
+    const parts = randomPartsTo(outcomes.length, total);
+    const randomized: Record<string, number> = {};
+    outcomes.forEach((o, i) => { randomized[o] = parts[i]; });
+    setCounts(randomized);
   };
 
-  const totalPct = Object.values(percentages).reduce((acc, v) => acc + (v || 0), 0);
-  const totalCases = Object.values(config).reduce((acc, v) => acc + (v || 0), 0);
+  const totalCases = Object.values(counts).reduce((acc, v) => acc + (v || 0), 0);
 
-  // Color hint for percentage total
-  const pctColor =
-    totalPct === 100 ? 'var(--primary)' :
-    totalPct > 100  ? '#f87171' :  // red — over
-    '#facc15';                      // yellow — under
+  // Derive percentage for each outcome
+  const getPercent = (count: number) => totalCases > 0 ? (count / totalCases) * 100 : 0;
 
   return (
     <div className="animate-fade-in flex-col">
@@ -104,7 +90,7 @@ export default function GenerateConfig({ rules, config, setConfig, onConfirm, on
         <button
           className="btn btn-primary"
           onClick={onConfirm}
-          disabled={totalCases === 0 || totalPct !== 100}
+          disabled={totalCases === 0}
         >
           Preview Generated Data <ArrowRight size={18} />
         </button>
@@ -113,52 +99,33 @@ export default function GenerateConfig({ rules, config, setConfig, onConfirm, on
       <div style={{ marginBottom: '2rem', textAlign: 'center' }}>
         <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>Configure Test Distribution</h2>
         <p style={{ color: 'var(--text-secondary)' }}>
-          Set the percentage of each outcome type and the total number of records to generate.
+          Set the number of records to generate for each outcome. Percentages are calculated automatically.
         </p>
       </div>
 
-      {/* Total records + Randomize row */}
+      {/* Randomize row */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        background: 'rgba(59, 130, 246, 0.06)',
-        border: '1px solid var(--border)',
-        borderRadius: '10px',
-        padding: '1rem 1.25rem',
-        marginBottom: '1.5rem',
-        gap: '1rem',
-        flexWrap: 'wrap'
+        justifyContent: 'flex-end',
+        marginBottom: '1rem',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <label style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>Total records</label>
-          <input
-            type="number"
-            min="1"
-            max="100000"
-            value={totalRecords}
-            onChange={e => setTotalRecords(Math.max(1, parseInt(e.target.value, 10) || 1))}
-            className="form-input"
-            style={{ width: '110px', padding: '0.5rem 0.75rem' }}
-          />
-        </div>
-
         <button
           onClick={handleRandomize}
           className="btn btn-secondary"
           style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-          title="Assign random percentages that add up to 100%"
+          title="Assign random record counts across all outcomes"
         >
           <Shuffle size={16} />
-          Randomize (sum to 100%)
+          Randomize
         </button>
       </div>
 
-      {/* Per-outcome sliders */}
+      {/* Per-outcome rows */}
       <div style={{ display: 'grid', gap: '0.875rem', marginBottom: '1.5rem' }}>
         {outcomes.map(outcome => {
-          const pct = percentages[outcome] ?? 0;
-          const count = Math.round((pct / 100) * totalRecords);
+          const count = counts[outcome] ?? 0;
+          const pct = getPercent(count);
           return (
             <div
               key={outcome}
@@ -166,7 +133,7 @@ export default function GenerateConfig({ rules, config, setConfig, onConfirm, on
                 display: 'flex',
                 alignItems: 'center',
                 gap: '1rem',
-              background: 'var(--field-bg)',
+                background: 'var(--field-bg)',
                 padding: '0.875rem 1rem',
                 borderRadius: '8px',
                 border: '1px solid var(--border)',
@@ -186,40 +153,48 @@ export default function GenerateConfig({ rules, config, setConfig, onConfirm, on
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
-                {/* Slider: 0-100 */}
-                <input
-                  type="range"
-                  min="0"
-                  max={Math.min(100, 100 - totalPct + pct)}
-                  step="1"
-                  value={pct}
-                  onChange={e => handlePercentageChange(outcome, parseInt(e.target.value, 10))}
-                  style={{ width: '150px' }}
-                />
-
-                {/* percentage number input */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                {/* Record count input */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <input
                     type="number"
                     min="0"
-                    max={Math.min(100, 100 - totalPct + pct)}
-                    value={pct}
-                    onChange={e => handlePercentageChange(outcome, parseInt(e.target.value, 10) || 0)}
+                    max="100000"
+                    value={count}
+                    onChange={e => handleCountChange(outcome, parseInt(e.target.value, 10) || 0)}
                     className="form-input"
-                    style={{ width: '64px', padding: '0.4rem 0.5rem', textAlign: 'right' }}
+                    style={{ width: '90px', padding: '0.4rem 0.5rem', textAlign: 'right' }}
                   />
-                  <span style={{ color: 'var(--text-secondary)', fontWeight: 600, fontSize: '0.95rem' }}>%</span>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>records</span>
                 </div>
 
-                {/* derived count badge */}
+                {/* Derived percentage badge */}
                 <div style={{
-                  minWidth: '72px',
+                  minWidth: '60px',
                   textAlign: 'right',
                   fontSize: '0.85rem',
-                  color: 'var(--text-secondary)',
-                  fontVariantNumeric: 'tabular-nums'
+                  fontWeight: 600,
+                  fontVariantNumeric: 'tabular-nums',
+                  color: count > 0 ? 'var(--primary)' : 'var(--text-secondary)',
+                  opacity: count > 0 ? 1 : 0.5,
                 }}>
-                  {count.toLocaleString()} rows
+                  {pct.toFixed(1)}%
+                </div>
+
+                {/* Mini bar */}
+                <div style={{
+                  width: '80px',
+                  height: '6px',
+                  background: 'var(--border)',
+                  borderRadius: '3px',
+                  overflow: 'hidden',
+                }}>
+                  <div style={{
+                    width: `${Math.min(pct, 100)}%`,
+                    height: '100%',
+                    background: 'var(--primary)',
+                    borderRadius: '3px',
+                    transition: 'width 0.2s ease',
+                  }} />
                 </div>
               </div>
             </div>
@@ -241,16 +216,18 @@ export default function GenerateConfig({ rules, config, setConfig, onConfirm, on
         gap: '0.5rem'
       }}>
         <div style={{ fontSize: '0.95rem', color: 'var(--text-secondary)' }}>
-          Percentage allocated:{' '}
-          <span style={{ fontWeight: 700, color: pctColor }}>{totalPct}%</span>
-          {totalPct !== 100 && (
-            <span style={{ marginLeft: '0.5rem', fontSize: '0.8rem', color: pctColor }}>
-              {totalPct > 100 ? `(${totalPct - 100}% over)` : `(${100 - totalPct}% unallocated)`}
+          Total records:{' '}
+          <span style={{ fontWeight: 700, color: totalCases > 0 ? 'var(--primary)' : '#facc15' }}>
+            {totalCases.toLocaleString()}
+          </span>
+          {totalCases === 0 && (
+            <span style={{ marginLeft: '0.5rem', fontSize: '0.8rem', color: '#facc15' }}>
+              (set at least one outcome above 0)
             </span>
           )}
         </div>
-        <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--primary)' }}>
-          Total cases: {totalCases.toLocaleString()}
+        <div style={{ fontSize: '0.95rem', color: 'var(--text-secondary)' }}>
+          {outcomes.filter(o => (counts[o] ?? 0) > 0).length} of {outcomes.length} outcomes active
         </div>
       </div>
 

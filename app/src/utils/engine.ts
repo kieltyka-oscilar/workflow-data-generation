@@ -23,92 +23,185 @@ export interface Constraint {
 
 // ─── extractConstraints ───────────────────────────────────────────────────────
 
-/** 
- * Simple parser to extract constraints from Boolean logic strings.
- * e.g. "(amount >= 500) && (score < 20)" -> [{field: 'amount', op: '>=', value: 500}, ...]
- */
 export function extractConstraints(condition: string, externalLists: ExternalLists = {}): Constraint[] {
   const constraints: Constraint[] = [];
-  
-  // If the condition has OR, pick a random branch to satisfy
-  const orBranches = condition.split(/\bOR\b/i);
+
+  /**
+   * Splits a string on a keyword (AND / OR) but only at the top-level —
+   * occurrences inside parentheses are left intact.
+   */
+  function splitTopLevel(text: string, keyword: RegExp): string[] {
+    const parts: string[] = [];
+    let depth = 0;
+    let current = '';
+    // Walk character by character, tracking paren depth
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === '(') { depth++; current += ch; continue; }
+      if (ch === ')') { depth--; current += ch; continue; }
+
+      if (depth === 0) {
+        // Check for keyword match at this position
+        const remaining = text.slice(i);
+        const m = remaining.match(keyword);
+        if (m && m.index === 0) {
+          parts.push(current);
+          current = '';
+          i += m[0].length - 1; // skip past the keyword
+          continue;
+        }
+      }
+      current += ch;
+    }
+    if (current) parts.push(current);
+    return parts;
+  }
+
+  // Split on OR (top-level only) and pick a random branch
+  const orBranches = splitTopLevel(condition, /\bOR\b/i);
   const selectedBranch = orBranches[Math.floor(Math.random() * orBranches.length)];
-  
-  const parts = selectedBranch.split(/&&|\bAND\b/i);
+
+  // Split on AND / && (top-level only)
+  const parts = splitTopLevel(selectedBranch, /&&|\bAND\b/i);
 
   parts.forEach(part => {
     let trimmed = part.trim();
-    // Remove outer parentheses
+
+    // Detect and strip NOT prefix (negates the resulting constraint)
+    let negated = false;
+    const notPrefix = trimmed.match(/^NOT\s+/i);
+    if (notPrefix) {
+      negated = true;
+      trimmed = trimmed.slice(notPrefix[0].length).trim();
+    }
+
+    // Remove outer parentheses (balanced)
     while (trimmed.startsWith('(') && trimmed.endsWith(')')) {
+      // Verify the parens are actually balanced (not just coincidental)
+      let depth = 0;
+      let balanced = true;
+      for (let i = 0; i < trimmed.length - 1; i++) {
+        if (trimmed[i] === '(') depth++;
+        else if (trimmed[i] === ')') depth--;
+        if (depth === 0) { balanced = false; break; }
+      }
+      if (!balanced) break;
       trimmed = trimmed.slice(1, -1).trim();
     }
-    
-    // Numeric/String comparison: field op value
-    // Matches: amount >= 500, status == 'active', score < 0.5, least(a,b) > 10
-    const match = trimmed.match(/^(.+?)\s*(>=|<=|>|<|===|==|!=|=)\s*(.+)$/i);
-    if (match) {
-      if (match[1].includes('(')) {
-        // This is a function call or complex expression, we can't easily satisfy it yet
-        return;
-      }
-      const valStr = match[3].trim();
-      let value: JsonScalar = valStr;
-      
-      if (valStr.toUpperCase() === 'TRUE') value = true;
-      else if (valStr.toUpperCase() === 'FALSE') value = false;
-      else if (valStr.startsWith("'") && valStr.endsWith("'")) value = valStr.slice(1, -1);
-      else if (valStr.startsWith('"') && valStr.endsWith('"')) value = valStr.slice(1, -1);
-      else if (!isNaN(Number(valStr))) value = Number(valStr);
 
-      constraints.push({
-        field: match[1].trim(),
-        operator: match[2].trim().replace(/^=$/, '==').replace(/^===$/, '=='),
-        value
-      });
-      return;
-    }
-
-    // IN operator: field IN list
-    const inMatch = trimmed.match(/^([a-zA-Z0-9_.]+)\s+IN\s+(.+)$/i);
-    if (inMatch) {
-      const valStr = inMatch[2].trim();
-      let value: JsonScalar[];
-      
-      if (externalLists[valStr]) {
-        value = externalLists[valStr] as JsonScalar[];
-      } else {
-        try {
-          // Try parse as JSON array
-          if (valStr.startsWith('[') && valStr.endsWith(']')) {
-            value = JSON.parse(valStr) as JsonScalar[];
-          } else {
-            // Clean quotes and split by comma
-            value = valStr.split(',').map(s => s.trim().replace(/^['"](.*)['"]$/, '$1'));
-          }
-        } catch {
-          value = [valStr]; // Fallback to treating it as a single item list
+    // If trimmed still contains top-level AND (e.g. from NOT(a AND b)),
+    // recurse into the inner parts
+    const innerParts = splitTopLevel(trimmed, /&&|\bAND\b/i);
+    if (innerParts.length > 1) {
+      // Process each inner part as its own constraint
+      innerParts.forEach(inner => {
+        let innerTrimmed = inner.trim();
+        while (innerTrimmed.startsWith('(') && innerTrimmed.endsWith(')')) {
+          innerTrimmed = innerTrimmed.slice(1, -1).trim();
         }
-      }
-      
-      constraints.push({
-        field: inMatch[1].trim(),
-        operator: 'IN',
-        value
+        const parsed = parseSingleConstraint(innerTrimmed, negated, externalLists);
+        if (parsed) constraints.push(parsed);
       });
       return;
     }
-
-    // IS NULL / IS NOT NULL
-    if (trimmed.includes('IS NOT NULL')) {
-      const field = trimmed.replace('IS NOT NULL', '').trim();
-      constraints.push({ field, operator: '!=', value: null });
-    } else if (trimmed.includes('IS NULL')) {
-      const field = trimmed.replace('IS NULL', '').trim();
-      constraints.push({ field, operator: '==', value: null });
-    }
+    
+    const parsed = parseSingleConstraint(trimmed, negated, externalLists);
+    if (parsed) constraints.push(parsed);
   });
 
   return constraints;
+}
+
+/** Parse a single comparison / IN / IS NULL expression into a Constraint */
+function parseSingleConstraint(
+  trimmed: string,
+  negated: boolean,
+  externalLists: ExternalLists
+): Constraint | null {
+  // Numeric/String comparison: field op value
+  const match = trimmed.match(/^(.+?)\s*(>=|<=|>|<|===|==|!=|=)\s*(.+)$/i);
+  if (match) {
+    let fieldExpr = match[1].trim();
+
+    // Unwrap simple function wrappers: lower(field), upper(field), trim(field)
+    const funcMatch = fieldExpr.match(/^(?:lower|upper|trim)\s*\(\s*([a-zA-Z0-9_.]+)\s*\)$/i);
+    if (funcMatch) {
+      fieldExpr = funcMatch[1];
+    } else if (fieldExpr.includes('(')) {
+      return null; // Complex expression we can't satisfy — skip
+    }
+
+    // Reject compound expressions (e.g. "deviceRiskScore + behaviorRiskScore")
+    if (/[+\-*/]/.test(fieldExpr)) {
+      return null;
+    }
+
+    // Validate: field must be a simple identifier (letters, digits, dots, underscores)
+    if (!/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(fieldExpr)) {
+      return null;
+    }
+
+    const valStr = match[3].trim();
+    let value: JsonScalar = valStr;
+    
+    if (valStr.toUpperCase() === 'TRUE') value = true;
+    else if (valStr.toUpperCase() === 'FALSE') value = false;
+    else if (valStr.startsWith("'") && valStr.endsWith("'")) value = valStr.slice(1, -1);
+    else if (valStr.startsWith('"') && valStr.endsWith('"')) value = valStr.slice(1, -1);
+    else if (!isNaN(Number(valStr))) value = Number(valStr);
+
+    let operator = match[2].trim().replace(/^=$/, '==').replace(/^===$/, '==');
+
+    // If the expression was NOT(...), invert the operator
+    if (negated) {
+      const invertOp: Record<string, string> = {
+        '==': '!=', '!=': '==', '>': '<=', '>=': '<', '<': '>=', '<=': '>',
+      };
+      operator = invertOp[operator] || operator;
+    }
+
+    return { field: fieldExpr, operator, value };
+  }
+
+  // IN operator: field IN list
+  const inMatch = trimmed.match(/^([a-zA-Z0-9_.]+)\s+IN\s+(.+)$/i);
+  if (inMatch) {
+    const valStr = inMatch[2].trim();
+    let value: JsonScalar[];
+    
+    if (externalLists[valStr]) {
+      value = externalLists[valStr] as JsonScalar[];
+    } else {
+      try {
+        if (valStr.startsWith('[') && valStr.endsWith(']')) {
+          value = JSON.parse(valStr) as JsonScalar[];
+        } else {
+          value = valStr.split(',').map(s => s.trim().replace(/^['"](.*)['"$]$/, '$1'));
+        }
+      } catch {
+        value = [valStr];
+      }
+    }
+    
+    return {
+      field: inMatch[1].trim(),
+      operator: negated ? 'NOT IN' : 'IN',
+      value
+    };
+  }
+
+  // IS NULL / IS NOT NULL
+  if (trimmed.includes('IS NOT NULL')) {
+    const field = trimmed.replace('IS NOT NULL', '').trim();
+    const op = negated ? '==' : '!=';
+    return { field, operator: op, value: null };
+  } else if (trimmed.includes('IS NULL')) {
+    const field = trimmed.replace('IS NULL', '').trim();
+    const op = negated ? '!=' : '==';
+    return { field, operator: op, value: null };
+  }
+
+  return null;
 }
 
 // ─── invertConstraints ────────────────────────────────────────────────────────
@@ -130,6 +223,83 @@ export function invertConstraints(constraints: Constraint[]): Constraint[] {
     ...c,
     operator: opMap[c.operator] || c.operator
   }));
+}
+
+// ─── buildAntiConstraints ─────────────────────────────────────────────────────
+
+/**
+ * When multiple anti-constraints target the same field, keeps only the most
+ * restrictive numeric bound so they don't overwrite each other.
+ */
+function deduplicateConstraints(constraints: Constraint[]): Constraint[] {
+  const byField = new Map<string, Constraint[]>();
+  for (const c of constraints) {
+    const arr = byField.get(c.field) || [];
+    arr.push(c);
+    byField.set(c.field, arr);
+  }
+
+  const result: Constraint[] = [];
+  for (const [, group] of byField) {
+    if (group.length === 1) { result.push(group[0]); continue; }
+
+    const upper = group.filter(c => (c.operator === '<' || c.operator === '<=') && typeof c.value === 'number');
+    const lower = group.filter(c => (c.operator === '>' || c.operator === '>=') && typeof c.value === 'number');
+    const others = group.filter(c => !['<', '<=', '>', '>='].includes(c.operator) || typeof c.value !== 'number');
+
+    if (upper.length > 0) {
+      upper.sort((a, b) => (a.value as number) - (b.value as number));
+      result.push(upper[0]); // tightest upper bound
+    }
+    if (lower.length > 0) {
+      lower.sort((a, b) => (b.value as number) - (a.value as number));
+      result.push(lower[0]); // tightest lower bound
+    }
+    result.push(...others);
+  }
+  return result;
+}
+
+/**
+ * Builds constraints that prevent triggering rules for OTHER outcomes.
+ * For each conflicting rule (AND-based), inverting its first parseable
+ * constraint is sufficient to prevent that rule from matching.
+ * 
+ * For rules with additive expressions (e.g. "a + b > 60"), we constrain
+ * each individual field to stay below threshold/N so their sum can't exceed it.
+ */
+export function buildAntiConstraints(
+  targetOutcome: string,
+  allRules: Rule[],
+  externalLists: ExternalLists = {}
+): Constraint[] {
+  const conflicting = allRules.filter(r => r.isTerminal && r.description !== targetOutcome);
+  const anti: Constraint[] = [];
+
+  for (const rule of conflicting) {
+    const rc = extractConstraints(rule.condition, externalLists);
+    if (rc.length > 0) {
+      // Inverting just the first constraint breaks the AND chain
+      anti.push(...invertConstraints([rc[0]]));
+    } else {
+      // Fallback: try to handle additive expressions like "a + b > 60"
+      // Pattern: field1 + field2 [+ fieldN...] > threshold
+      const additiveMatch = rule.condition.match(
+        /^([\w.]+(?:\s*\+\s*[\w.]+)+)\s*(>|>=)\s*([\d.]+)$/
+      );
+      if (additiveMatch) {
+        const fields = additiveMatch[1].split(/\s*\+\s*/).map(f => f.trim());
+        const threshold = Number(additiveMatch[3]);
+        // Constrain each field to threshold / N so their sum stays under
+        const perField = Math.floor(threshold / fields.length);
+        for (const field of fields) {
+          anti.push({ field, operator: '<=', value: perField });
+        }
+      }
+    }
+  }
+
+  return deduplicateConstraints(anti);
 }
 
 // ─── applyConstraints ─────────────────────────────────────────────────────────
@@ -172,7 +342,7 @@ export function applyConstraints(obj: JsonRecord, constraints: Constraint[]): vo
         break;
       case '!=':
         if (curr[lastKey] === c.value) {
-          curr[lastKey] = typeof c.value === 'number' ? c.value + 1 : (typeof c.value === 'string' ? c.value + '_diff' : !c.value);
+          curr[lastKey] = typeof c.value === 'number' ? c.value + 1 : (typeof c.value === 'string' ? 'safe_fallback_value' : !c.value);
         }
         break;
       case 'IN':
@@ -188,18 +358,356 @@ export function applyConstraints(obj: JsonRecord, constraints: Constraint[]): vo
         if (Array.isArray(c.value)) {
           // If current value is in the list, change it to something outside
           if (c.value.some(v => v === curr[lastKey])) {
-            curr[lastKey] = String(curr[lastKey]) + '_not_in';
+            curr[lastKey] = 'safe_fallback_value';
           }
         } else if (typeof c.value === 'string') {
           const list = c.value.replace(/[()[\]]/g, '').split(',').map(s => s.trim().replace(/^'|'$/g, '').replace(/^"|"$/g, ''));
           // If current value is in the list, change it
           if (list.includes(String(curr[lastKey]))) {
-            curr[lastKey] = String(curr[lastKey]) + '_not_in';
+            curr[lastKey] = 'safe_fallback_value';
           }
         }
         break;
     }
   });
+}
+
+// ─── simulateWorkflow ─────────────────────────────────────────────────────────
+
+/**
+ * Walk the execution graph with a record and return the terminal action name
+ * that the record would reach. This simulates the real workflow evaluation,
+ * handling loops, intermediate decisions, and multi-step routing.
+ */
+export function simulateWorkflow(
+  record: JsonRecord,
+  workflow: Workflow
+): string | null {
+  if (!workflow.workflows) return null;
+
+  // Clone the record so we don't pollute the actual generated data with local variable assignments
+  const simRecord = { ...record };
+
+  // Use the first workflow that has steps (skip trivial ones)
+  const wfGraph = workflow.workflows.find(
+    wf => (wf.execution_graph?.steps?.length ?? 0) > 2
+  );
+  if (!wfGraph?.execution_graph?.steps) return null;
+
+  const steps = wfGraph.execution_graph.steps;
+  const actionsRegistry = new Map<string, string>();
+  workflow.actions?.forEach(a => actionsRegistry.set(a.id, a.name));
+
+  // Find the first decision step as entry point (skip assign/integration steps)
+  let currentStepIdx = 0;
+  const visited = new Set<string>(); // Track visits to prevent infinite loops
+  const MAX_ITERATIONS = 50;
+  let iterations = 0;
+
+  while (iterations < MAX_ITERATIONS) {
+    iterations++;
+    if (currentStepIdx < 0 || currentStepIdx >= steps.length) return null;
+    const step = steps[currentStepIdx];
+
+    // Visit tracking: stepIdx + iteration to allow controlled revisits
+    const visitKey = `${currentStepIdx}:${iterations}`;
+    if (visited.has(`${currentStepIdx}`) && visited.size > steps.length) {
+      return null; // Prevent truly infinite loops
+    }
+    visited.add(`${currentStepIdx}`);
+
+    if (step.type === 'action') {
+      // Terminal: resolve the action name
+      const actionId = step.actions?.[0]?.action_id;
+      if (actionId) {
+        return actionsRegistry.get(actionId) ?? step.label ?? step.name ?? 'Unknown';
+      }
+      return step.label ?? step.name ?? 'Unknown';
+    }
+
+    const processAssignments = (assignments?: any[]) => {
+      for (const a of assignments || []) {
+        if (!a || !a.name || !a.value) continue;
+        if (a.value.type === 'constant') {
+          let val: any = a.value.constant_value;
+          if (val === 'true') val = true;
+          else if (val === 'false') val = false;
+          else if (typeof val === 'string' && !isNaN(Number(val)) && val.trim() !== '') {
+            val = Number(val);
+          }
+          simRecord[a.name] = val;
+        } else if (a.value.type === 'math_function' && a.value.plaintext) {
+          const match = a.value.plaintext.match(/^([a-zA-Z0-9_.]+)\s*([+\-*/])\s*([0-9.]+)$/);
+          if (match) {
+            const field = match[1];
+            const op = match[2];
+            const num = Number(match[3]);
+            const current = Number(simRecord[field] || 0);
+            if (op === '+') simRecord[a.name] = current + num;
+            else if (op === '-') simRecord[a.name] = current - num;
+            else if (op === '*') simRecord[a.name] = current * num;
+            else if (op === '/') simRecord[a.name] = current / num;
+          } else {
+            simRecord[a.name] = 'MOCKED_VALUE';
+          }
+        } else {
+          // Mock non-constant assignments to ensure IS NULL checks fail properly for populated local vars
+          simRecord[a.name] = 'MOCKED_VALUE';
+        }
+      }
+    };
+
+    // Process step-level entry assignments
+    processAssignments(step.assignments);
+
+    if (step.type === 'decision') {
+      let matched = false;
+
+      for (const edge of (step.edges ?? [])) {
+        if (!edge.condition?.plaintext) continue;
+        if (evaluateSimulatedCondition(simRecord, edge.condition.plaintext)) {
+          matched = true;
+          processAssignments(edge.assignments);
+          if (edge.next_step_id !== undefined) {
+            currentStepIdx = edge.next_step_id;
+          } else if (step.default_step_id !== undefined) {
+            currentStepIdx = step.default_step_id;
+          } else {
+            return null; // Dead end branch with no default fallback
+          }
+          break;
+        }
+
+        // Check else_if_edges
+        if (edge.else_if_edges) {
+          let elseIfMatched = false;
+          for (const elseIf of edge.else_if_edges) {
+            if (!elseIf.condition?.plaintext) continue;
+            if (evaluateSimulatedCondition(simRecord, elseIf.condition.plaintext)) {
+              matched = true;
+              elseIfMatched = true;
+              processAssignments(elseIf.assignments);
+              if (elseIf.next_step_id !== undefined) {
+                currentStepIdx = elseIf.next_step_id;
+              } else if (step.default_step_id !== undefined) {
+                currentStepIdx = step.default_step_id;
+              } else {
+                return null; // Dead end branch with no default fallback
+              }
+              break;
+            }
+          }
+          if (elseIfMatched) break;
+        }
+      }
+
+      if (!matched) {
+        // Default path
+        processAssignments(step.default_assignments);
+        if (step.default_step_id !== undefined) {
+          currentStepIdx = step.default_step_id;
+        } else {
+          // No default, move to next step
+          currentStepIdx++;
+        }
+      }
+      continue;
+    }
+
+    // For all other step types (assign, call_integration, call_workflow)
+    if (step.default_step_id !== undefined) {
+      currentStepIdx = step.default_step_id;
+    } else {
+      currentStepIdx++;
+    }
+  }
+
+  return null; // Max iterations reached
+}
+
+/**
+ * Evaluate a plaintext condition against a record.
+ * Returns true if the condition is satisfied.
+ */
+function evaluateSimulatedCondition(record: JsonRecord, condition: string): boolean {
+  // Handle OR at top level
+  const orParts = splitConditionTopLevel(condition, /\bOR\b/i);
+  if (orParts.length > 1) {
+    return orParts.some(part => evaluateSimulatedCondition(record, part.trim()));
+  }
+
+  // Handle AND at top level
+  const andParts = splitConditionTopLevel(condition, /&&|\bAND\b/i);
+  if (andParts.length > 1) {
+    return andParts.every(part => evaluateSimulatedCondition(record, part.trim()));
+  }
+
+  let expr = condition.trim();
+
+  // Handle NOT prefix
+  let negated = false;
+  const notMatch = expr.match(/^NOT\s+/i);
+  if (notMatch) {
+    negated = true;
+    expr = expr.slice(notMatch[0].length).trim();
+  }
+
+  // Strip balanced outer parens
+  while (expr.startsWith('(') && expr.endsWith(')')) {
+    let depth = 0;
+    let balanced = true;
+    for (let i = 0; i < expr.length - 1; i++) {
+      if (expr[i] === '(') depth++;
+      else if (expr[i] === ')') depth--;
+      if (depth === 0) { balanced = false; break; }
+    }
+    if (!balanced) break;
+    expr = expr.slice(1, -1).trim();
+  }
+
+  // If after stripping we have compound logic again, recurse
+  const innerOr = splitConditionTopLevel(expr, /\bOR\b/i);
+  if (innerOr.length > 1) {
+    const result = innerOr.some(p => evaluateSimulatedCondition(record, p.trim()));
+    return negated ? !result : result;
+  }
+  const innerAnd = splitConditionTopLevel(expr, /&&|\bAND\b/i);
+  if (innerAnd.length > 1) {
+    const result = innerAnd.every(p => evaluateSimulatedCondition(record, p.trim()));
+    return negated ? !result : result;
+  }
+
+  const result = evaluateSingle(record, expr);
+  return negated ? !result : result;
+}
+
+/** Paren-aware split (same logic as extractConstraints' splitTopLevel) */
+function splitConditionTopLevel(text: string, keyword: RegExp): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '(') { depth++; current += ch; continue; }
+    if (ch === ')') { depth--; current += ch; continue; }
+    if (depth === 0) {
+      const remaining = text.slice(i);
+      const m = remaining.match(keyword);
+      if (m && m.index === 0) {
+        parts.push(current);
+        current = '';
+        i += m[0].length - 1;
+        continue;
+      }
+    }
+    current += ch;
+  }
+  if (current) parts.push(current);
+  return parts;
+}
+
+/** Resolve a dot-path like "emailage.risk_rating" from a nested record */
+function resolveFieldValue(record: JsonRecord, fieldPath: string): unknown {
+  const parts = fieldPath.split('.');
+  let current: unknown = record;
+  for (const part of parts) {
+    if (current === null || current === undefined || typeof current !== 'object') {
+      return undefined;
+    }
+    current = (current as JsonRecord)[part];
+  }
+  return current;
+}
+
+/** Evaluate a single atomic expression (no AND/OR) */
+function evaluateSingle(record: JsonRecord, expr: string): boolean {
+  // IS NOT NULL
+  if (/IS NOT NULL$/i.test(expr)) {
+    const field = expr.replace(/IS NOT NULL$/i, '').trim();
+    const val = resolveFieldValue(record, field);
+    return val !== null && val !== undefined;
+  }
+  // IS NULL
+  if (/IS NULL$/i.test(expr)) {
+    const field = expr.replace(/IS NULL$/i, '').trim();
+    const val = resolveFieldValue(record, field);
+    return val === null || val === undefined;
+  }
+
+  // Comparison: field op value
+  const cmpMatch = expr.match(/^(.+?)\s*(>=|<=|>|<|===|==|!=|=)\s*(.+)$/);
+  if (cmpMatch) {
+    let fieldExpr = cmpMatch[1].trim();
+    const op = cmpMatch[2].trim();
+    let rhsStr = cmpMatch[3].trim();
+
+    // Unwrap lower/upper/trim
+    const funcM = fieldExpr.match(/^(lower|upper|trim)\s*\(\s*(.+?)\s*\)$/i);
+    let transform: ((s: string) => string) | null = null;
+    if (funcM) {
+      const fn = funcM[1].toLowerCase();
+      if (fn === 'lower') transform = s => s.toLowerCase();
+      else if (fn === 'upper') transform = s => s.toUpperCase();
+      else if (fn === 'trim') transform = s => s.trim();
+      fieldExpr = funcM[2];
+    }
+
+    // Handle additive expressions: field1 + field2
+    let lhsValue: unknown;
+    if (fieldExpr.includes('+')) {
+      const fields = fieldExpr.split(/\s*\+\s*/);
+      let sum = 0;
+      for (const f of fields) {
+        const v = resolveFieldValue(record, f.trim());
+        sum += typeof v === 'number' ? v : 0;
+      }
+      lhsValue = sum;
+    } else {
+      lhsValue = resolveFieldValue(record, fieldExpr);
+    }
+
+    if (transform && typeof lhsValue === 'string') {
+      lhsValue = transform(lhsValue);
+    }
+
+    // Parse RHS value
+    let rhsValue: unknown = rhsStr;
+    if (rhsStr.toUpperCase() === 'TRUE') rhsValue = true;
+    else if (rhsStr.toUpperCase() === 'FALSE') rhsValue = false;
+    else if (rhsStr.startsWith("'") && rhsStr.endsWith("'")) rhsValue = rhsStr.slice(1, -1);
+    else if (rhsStr.startsWith('"') && rhsStr.endsWith('"')) rhsValue = rhsStr.slice(1, -1);
+    else if (!isNaN(Number(rhsStr))) rhsValue = Number(rhsStr);
+
+    return compareValues(lhsValue, op, rhsValue);
+  }
+
+  // If we can't parse, assume false (safe default)
+  return false;
+}
+
+function compareValues(lhs: unknown, op: string, rhs: unknown): boolean {
+  // Coerce: if one side is number and the other is a numeric string, convert
+  if (typeof lhs === 'number' && typeof rhs === 'string' && !isNaN(Number(rhs))) rhs = Number(rhs);
+  if (typeof rhs === 'number' && typeof lhs === 'string' && !isNaN(Number(lhs))) lhs = Number(lhs);
+
+  switch (op) {
+    case '=':
+    case '==':
+    case '===':
+      return lhs === rhs;
+    case '!=':
+      return lhs !== rhs;
+    case '>':
+      return typeof lhs === 'number' && typeof rhs === 'number' ? lhs > rhs : false;
+    case '>=':
+      return typeof lhs === 'number' && typeof rhs === 'number' ? lhs >= rhs : false;
+    case '<':
+      return typeof lhs === 'number' && typeof rhs === 'number' ? lhs < rhs : false;
+    case '<=':
+      return typeof lhs === 'number' && typeof rhs === 'number' ? lhs <= rhs : false;
+    default:
+      return false;
+  }
 }
 
 // ─── extractRules ─────────────────────────────────────────────────────────────
@@ -417,6 +925,13 @@ export function markOptionalFromRules(schema: SchemaField[], rules: Rule[]): Sch
 /** Generates context-aware string values using faker.js */
 function getFakerValue(key: string, baseValue?: string, example?: string): string {
   const norm = key.toLowerCase();
+  
+  // Check if baseValue or example matches MM/DD/YYYY format
+  const isMMDDYYYY = (val?: string) => val && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(val);
+  if (isMMDDYYYY(baseValue) || isMMDDYYYY(example)) {
+    const d = faker.date.past();
+    return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+  }
   
   if (norm.includes('first_name')) return faker.person.firstName();
   if (norm.includes('last_name')) return faker.person.lastName();

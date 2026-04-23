@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { CirclePlay, Download, CircleCheck, RefreshCcw } from 'lucide-react';
 import type { Workflow, Rule, SchemaField, GeneratedConfig } from '../types';
-import { fuzzData, pruneToSchema, extractConstraints, invertConstraints } from '../utils/engine';
+import { fuzzData, pruneToSchema, extractConstraints, invertConstraints, buildAntiConstraints, simulateWorkflow } from '../utils/engine';
 
 interface ResultViewProps {
   workflow: Workflow;
@@ -14,8 +14,9 @@ interface ResultViewProps {
 }
 
 const CHUNK_SIZE = 200; // records per animation frame
+const MAX_RETRIES = 50; // max regeneration attempts per record
 
-export default function ResultView({ sampleData, schema, rules, config, externalLists, onReset }: ResultViewProps) {
+export default function ResultView({ workflow, sampleData, schema, rules, config, externalLists, onReset }: ResultViewProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [results, setResults] = useState<Record<string, unknown>[]>([]);
@@ -40,13 +41,16 @@ export default function ResultView({ sampleData, schema, rules, config, external
       if (outcome === 'Default (No Match)') {
         outcomeConstraints[outcome] = defaultInvertedConstraints;
       } else {
+        // Merge constraints from ALL rules that map to this outcome
+        // (e.g. Approve may require passing multiple workflow gates)
         const categoryRules = rules.filter(r => r.description === outcome);
-        if (categoryRules.length > 0) {
-          const rule = categoryRules[Math.floor(Math.random() * categoryRules.length)];
-          outcomeConstraints[outcome] = extractConstraints(rule.condition, externalLists);
-        } else {
-          outcomeConstraints[outcome] = [];
-        }
+        const targetConstraints = categoryRules.flatMap(r =>
+          extractConstraints(r.condition, externalLists)
+        );
+        // Anti-constraints prevent accidentally triggering OTHER outcomes
+        const antiConstraints = buildAntiConstraints(outcome, rules, externalLists);
+        // Anti-constraints go first so target constraints take priority on overlap
+        outcomeConstraints[outcome] = [...antiConstraints, ...targetConstraints];
       }
     });
 
@@ -63,25 +67,55 @@ export default function ResultView({ sampleData, schema, rules, config, external
     let idx = 0;
 
     const processChunk = () => {
-      const end = Math.min(idx + CHUNK_SIZE, workQueue.length);
-      for (; idx < end; idx++) {
-        const { outcome, constraints } = workQueue[idx];
-        const base = sampleData[Math.floor(Math.random() * sampleData.length)] || {};
-        const fuzzed = fuzzData(base, schema, constraints);
-        const clean = pruneToSchema(fuzzed, schema);
-        generated.push(clean);
-        currentCounts[outcome] = (currentCounts[outcome] || 0) + 1;
-      }
+      try {
+        const end = Math.min(idx + CHUNK_SIZE, workQueue.length);
+        for (; idx < end; idx++) {
+          const { outcome, constraints } = workQueue[idx];
+          let clean: Record<string, unknown> | null = null;
 
-      const pct = Math.round((idx / (totalRecords || 1)) * 100);
-      setProgress(pct);
-      setDistribution({ ...currentCounts });
+          // Generate with retry: simulate the workflow and regenerate
+          for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            const base = sampleData[Math.floor(Math.random() * sampleData.length)] || {};
+            const fuzzed = fuzzData(base, schema, constraints);
+            const candidate = pruneToSchema(fuzzed, schema);
 
-      if (idx < workQueue.length) {
-        requestAnimationFrame(processChunk);
-      } else {
+            try {
+              // Validate against the workflow simulator
+              const simResult = simulateWorkflow(candidate, workflow);
+              if (simResult === outcome) {
+                // Strict match found
+                clean = candidate;
+                break;
+              }
+            } catch (err) {
+              console.error("Simulation error during generation:", err);
+            }
+          }
+
+          // If all retries failed, use the last attempt anyway
+          if (!clean) {
+            const base = sampleData[Math.floor(Math.random() * sampleData.length)] || {};
+            const fuzzed = fuzzData(base, schema, constraints);
+            clean = pruneToSchema(fuzzed, schema);
+          }
+
+          generated.push(clean);
+          currentCounts[outcome] = (currentCounts[outcome] || 0) + 1;
+        }
+
+        const pct = Math.round((idx / (totalRecords || 1)) * 100);
+        setProgress(pct);
+        setDistribution({ ...currentCounts });
+
+        if (idx < workQueue.length) {
+          requestAnimationFrame(processChunk);
+        } else {
+          setIsGenerating(false);
+          setResults(generated);
+        }
+      } catch (err) {
+        console.error("Result generation failed:", err);
         setIsGenerating(false);
-        setResults(generated);
       }
     };
 

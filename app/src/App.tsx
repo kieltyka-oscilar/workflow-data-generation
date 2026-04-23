@@ -158,6 +158,7 @@ function App() {
       case 5:
         return (
           <PreviewGeneration
+            workflow={workflow!}
             rules={rules}
             sampleData={sampleData}
             schema={schema}
